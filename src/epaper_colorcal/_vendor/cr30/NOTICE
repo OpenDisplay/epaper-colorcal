@@ -1,0 +1,24 @@
+CR30 protocol slice — vendored third-party code
+================================================
+
+The Python modules in this directory (packets.py, device.py, protocol.py) are
+a trimmed copy of the `cr30reader` package from:
+
+    itohio/color-science  —  https://github.com/itohio/color-science
+    License: MIT (see LICENSE-itohio in this directory)
+
+Reverse-engineering writeup:
+    https://itohi.com/colorimetry/reverse-engineering-cr30/
+
+Only the low-level serial protocol needed to (a) connect, (b) run black/white
+calibration, and (c) read the raw 31-band spectral power distribution (SPD) has
+been kept. The upstream colour-science, Argyll, GUI, CLI and driver layers were
+intentionally dropped — epaper-colorcal does its own colorimetry with the
+`colour-science` package.
+
+Local modifications:
+  - Removed the unused `import numpy as np` from protocol.py.
+  - No functional changes to the protocol/packet logic.
+
+Keeping this as a clean, attributed copy (rather than a dependency) so the
+reverse-engineered protocol can be patched for specific CR30 units/firmware.
