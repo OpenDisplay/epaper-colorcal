@@ -41,7 +41,9 @@ class CR30Protocol(CR30Device):
         
         try:
             payload = self._packet_parser.extract_payload(response)
-            status = payload[1] if len(payload) > 1 else 0
+            # Verified against a real CR30 (2026-07-26): status is payload[2], not
+            # payload[1] as originally assumed from the reverse-engineering writeup.
+            status = payload[2] if len(payload) > 2 else 0
         except ValueError as e:
             raise ValueError(f"Invalid calibration response packet: {e}") from e
         

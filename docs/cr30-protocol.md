@@ -84,14 +84,20 @@ to be setup the stock software performs and may or may not be required.
 
 ## Calibration
 
-Place the device on the black, then the white, calibration tile.
+**Verified against a real CR30 (2026-07-26).** This unit has a single cap, closed fully over
+the aperture for *both* black and white calibration — there's a white reference patch fixed
+inside the cap. Working assumption: black calibration reads the sensor with the device's own
+light source off (sealed, dark baseline); white calibration fires the light source and reads
+its reflection off the cap's internal white patch. No separate black tile needed.
 
 ```
 black:  send  BB 10 00 00 ,  read response
 white:  send  BB 11 00 00 ,  read response
 ```
 
-Success ⟺ `response.payload[1] == 0x01`.
+Success ⟺ `response.payload[2] == 0x01` (not `payload[1]` — the original reverse-engineering
+writeup guessed wrong; both black and white calibration on real hardware return
+`payload == 00 00 01 00 ...`).
 
 ---
 
