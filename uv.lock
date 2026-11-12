@@ -417,17 +417,22 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "prek" },
-    { name = "pylint" },
-    { name = "ruff" },
-]
 opendisplay = [
     { name = "py-opendisplay", marker = "python_full_version >= '3.13'" },
 ]
 serial = [
     { name = "pyserial-asyncio" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "prek" },
+    { name = "pylint" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
 ]
 test = [
     { name = "pytest" },
@@ -439,18 +444,27 @@ test = [
 requires-dist = [
     { name = "colour-science", specifier = ">=0.4.4" },
     { name = "epaper-dithering", specifier = ">=7,<8" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "prek", marker = "extra == 'dev'", specifier = ">=0.3.4" },
     { name = "py-opendisplay", marker = "python_full_version >= '3.13' and extra == 'opendisplay'", specifier = ">=8.0.0" },
-    { name = "pylint", marker = "extra == 'dev'", specifier = ">=4.0.5" },
     { name = "pyserial-asyncio", marker = "extra == 'serial'", specifier = ">=0.6" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1.3.0" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=7.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.10" },
 ]
-provides-extras = ["serial", "opendisplay", "test", "dev"]
+provides-extras = ["serial", "opendisplay"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.19.1" },
+    { name = "prek", specifier = ">=0.3.4" },
+    { name = "pylint", specifier = ">=4.0.5" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.14.10" },
+]
+test = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "epaper-dithering"

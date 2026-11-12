@@ -28,7 +28,7 @@ sidecar of the raw spectra.
 
 ```bash
 # clone, then:
-uv sync --all-extras          # dev + test + serial
+uv sync --all-extras          # dev + test (default) + serial + opendisplay
 # or, to actually talk to the device:
 uv sync --extra serial
 ```
