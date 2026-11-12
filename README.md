@@ -47,9 +47,9 @@ shape before a device arrives.
 
 ## Measuring a real panel
 
-1. **Generate solid color patches.** Use `epaper-dithering`'s
-   `packages/python/scripts/generate_patches.py` (or just fill the screen with each solid
-   color). Each patch must be larger than the CR30's 8 mm reading window.
+1. **Show each solid ink.** Fill the screen with the ink's nominal colour (`#ff0000` for red,
+   ...) and send it undithered, e.g. `opendisplay upload --dither-mode none`. The patch must be
+   larger than the CR30's 8 mm reading window. Interactive mode does this for you.
 
 2. **Connect the CR30 over USB** and find its serial port:
    - macOS: `ls /dev/tty.usbserial-*`

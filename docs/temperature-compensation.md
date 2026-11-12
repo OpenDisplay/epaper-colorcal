@@ -15,28 +15,33 @@ measurement metadata; the rest is future work in the two sibling repos.
   carries chip temperature — `discovery.py` ("battery voltage, chip temperature, and loop
   counter"), exposed as `AdvertisementData.temperature_c` (used in `cli.py`). There's also
   `SensorType.TEMPERATURE` for configured sensors. No connection required to read it.
-- **`epaper-dithering` is the single source of truth for measured palettes.**
-  `py-opendisplay/display_palettes.py` *imports* them from `epaper_dithering` and maps
-  `(panel_ic_type, ColorScheme) → ColorPalette` (`DISPLAY_PALETTE_MAP`). The JS package,
-  `odl-renderer`, OpenDithering and direct library users also consume these palettes.
+- **`py-opendisplay` owns the measured palettes.** Since epaper-dithering 7, the dithering
+  library ships no palettes. py-opendisplay keeps them as `epaper-palette` JSON files in
+  `src/opendisplay/palettes/` and maps `(panel_ic_type, ColorScheme) → file` in
+  `MEASURED_PALETTE_FILES` (`display_palettes.py`). Other consumers (the JS package,
+  `odl-renderer`, OpenDithering) load palette files the same way, so a file is the unit to share.
+- **The palette format has no temperature field.** `epaper-colorcal` records the temperature in
+  the palette's `source` string ("..., panel at 23°C") and as `temperature_c` in the raw-spectra
+  sidecar.
 
 ## Decision: split by responsibility
 
 | Layer | Responsibility |
 |-------|----------------|
-| **epaper-dithering** | Palette **data** (temperature-tagged) + a **pure** `palette_at_temperature(family, T)` interpolation |
-| **py-opendisplay** | **Runtime glue**: read live temp → pick the panel's family → get the palette at T → dither |
+| **epaper-dithering** | A **pure** `palette_at_temperature(family, T)` interpolation over `Palette`s, and a temperature field in the format if the family needs one |
+| **py-opendisplay** | Palette **data** (temperature-tagged files) + **runtime glue**: read live temp → pick the panel's family → get the palette at T → dither |
 | **epaper-colorcal** (this repo) | **Produces** the temperature-tagged data (measures a panel at several temps) |
 
-### Why the data + math stay in epaper-dithering
-- It's the single source of truth; forking temperature data into `py-opendisplay` would split it
-  and cut every non-BLE / JS consumer out of temperature compensation.
-- Interpolating colors between temperature points is colorimetry — it belongs next to the other
-  color math (`color_space_lab.rs`, `tone_map.rs`), stateless and pure, reusable by all bindings.
+### Why the math goes in epaper-dithering
+- Interpolating colors between temperature points is colorimetry — it belongs next to the
+  `Palette` type and the other color math (`color_space_lab.rs`), stateless and pure, reusable
+  by all bindings, including consumers that load palette files without py-opendisplay.
+- The data sits with the panel mapping in py-opendisplay, where the measured palettes already
+  live; keeping each temperature point a plain palette file keeps it loadable everywhere.
 
 ### Why py-opendisplay drives it
 - It's the only layer that knows the **actual current temperature** (the sensor).
-- It already owns palette **selection** (`DISPLAY_PALETTE_MAP`) and already calls the dither.
+- It already owns palette **selection** (`get_palette_for_display`) and already calls the dither.
   Temperature is a runtime device property, not a property of an image or a generic dither call.
 
 ## Data flow
@@ -45,27 +50,27 @@ measurement metadata; the rest is future work in the two sibling repos.
 epaper-colorcal:  measure panel @ 15/25/35 °C  →  emit temp-tagged palettes
         │
         ▼
-epaper-dithering: measured_palettes.rs holds the family;  palette_at_temperature(family, T)   ← pure
+py-opendisplay:   palettes/*.json hold the family; read adv.temperature_c → pick family for
+                  (panel_ic, scheme)                                                         ← data + glue
         │
         ▼
-py-opendisplay:   read adv.temperature_c → pick family for (panel_ic, scheme)
-                  → palette_at_temperature(family, T) → prepare_image/dither                  ← glue
+epaper-dithering: palette_at_temperature(family, T) → dither_image                          ← pure
 ```
 
 ## How — phased
 
 **Phase 1 — nearest match (cheap, do first).**
-- `epaper-dithering`: give each measured palette a temperature; allow several entries per panel
-  (e.g. `SPECTRA_7_3_6COLOR_25C`). The `MeasuredPaletteEntry`/CATALOG structure already exists —
-  add a temperature field.
-- `py-opendisplay`: turn `DISPLAY_PALETTE_MAP` values into a *family* per `(panel_ic, scheme)`,
-  read `adv.temperature_c`, snap to the nearest measured temperature.
+- `py-opendisplay`: allow several palette files per panel (e.g. `spectra6_7in3_25c.json`) and
+  turn `MEASURED_PALETTE_FILES` values into a *family* of `(temperature_c, file)` per
+  `(panel_ic, scheme)`; read `adv.temperature_c`, snap to the nearest measured temperature.
+  The temperature can live in the mapping, so the format doesn't need to change for this.
 - Even one palette measured at ~25 °C, recorded, is already better than today.
 
 **Phase 2 — interpolate.**
-- `epaper-dithering`: add a pure `palette_at_temperature(family, T)` that lerps each ink in
-  **linear RGB or OKLab** (it already has `srgb↔linear` and OKLab) — **not** in sRGB u8, which
-  would blend through gamma incorrectly.
+- `epaper-dithering`: add a pure `palette_at_temperature(family, T)` that lerps each ink's
+  `appearance` (CIELAB, already perceptual and white-normalised) or its XYZ — **not** in
+  gamma-encoded sRGB, which would blend incorrectly. All palettes in a family must share
+  entry names and order.
 - `py-opendisplay`: call it with the live temperature.
 
 ### Data model
@@ -96,6 +101,6 @@ in the host stack (epaper-dithering + py-opendisplay), not in firmware.
 
 `epaper-colorcal` is the data producer. Today it records a single `--temp` per run. The future
 extension is a small loop: measure the same panel at several temperatures (manually, or driven
-via interactive mode + a thermal chamber) and emit one tagged palette per temperature, which
-populate `epaper-dithering`'s temperature-tagged catalog. The raw-spectra JSON sidecars already
+via interactive mode + a thermal chamber) and emit one palette file per temperature, which
+populate py-opendisplay's per-panel family. The raw-spectra JSON sidecars already
 capture `temperature_c`, so re-processing is possible without re-measuring.
