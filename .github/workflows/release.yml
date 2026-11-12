@@ -4,44 +4,60 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish to PyPI (e.g. v0.1.0). Leave empty to run release-please only."
+        required: false
+        type: string
 
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write  # For PyPI trusted publishing
+permissions: {}
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           release-type: python
 
-      # The following steps only run if a release was created
+  # Runs after release-please creates a release, or on a manual dispatch with a tag
+  # (to retry a publish that failed: re-running the push run skips it, because
+  # release-please no longer reports the release as newly created).
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # For PyPI trusted publishing
+    steps:
       - name: Checkout code
-        if: ${{ steps.release.outputs.release_created }}
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
 
       - name: Set up Python
-        if: ${{ steps.release.outputs.release_created }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install uv
-        if: ${{ steps.release.outputs.release_created }}
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        if: ${{ steps.release.outputs.release_created }}
         run: uv sync
 
       - name: Build package
-        if: ${{ steps.release.outputs.release_created }}
         run: uv build
 
       - name: Publish to PyPI
-        if: ${{ steps.release.outputs.release_created }}
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
