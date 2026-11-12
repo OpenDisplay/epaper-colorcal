@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from .colorimetry import average_spds, reading_from_spd
-from .emit_rust import MeasuredColor
+from .emit import MeasuredColor
 from .schemes import Scheme
 
 # One reflectance read for a color (async because the real source talks to the CR30).
@@ -118,12 +118,8 @@ class OpenDisplayPanel:
             raise RuntimeError("connect() must be called before show_color()")
 
         image = self._solid_ink_image(index)
-        # HARDWARE TODO: this currently sends a solid RGB image and lets the library
-        # quantize it. To measure ink `index` cleanly we must push the *palette index*
-        # directly (no measured-palette remapping), otherwise the result is circular —
-        # we'd be measuring through the palette we're trying to measure. Verify the
-        # right py-opendisplay path (upload_prepared_image / a NONE-dither index image)
-        # against real hardware.
+        # The image is the ink's nominal colour, which epaper-dithering always maps to that
+        # ink, so the panel shows the pure ink whatever palette the device is using.
         from epaper_dithering import DitherMode  # provided transitively by py-opendisplay
 
         await self._device.upload_image(image, dither_mode=DitherMode.NONE)
@@ -134,16 +130,16 @@ class OpenDisplayPanel:
         await asyncio.sleep(self._settle)
 
     def _solid_ink_image(self, index: int):  # type: ignore[no-untyped-def]
-        """Build a full-screen solid image of the scheme's color at ``index``.
+        """Build a full-screen image of the nominal colour of the scheme's ink at ``index``.
 
         Placeholder geometry until the device reports real dimensions; sized large
         enough to exceed the CR30's reading window after fit/scale.
         """
         from PIL import Image
 
-        from .synthetic import IDEAL_SRGB
+        from .emit import NOMINALS
 
-        rgb = IDEAL_SRGB.get(self._scheme.colors[index], (128, 128, 128))
+        rgb = NOMINALS[self._scheme.colors[index]]
         # HARDWARE TODO: use self._device.width/height once connected.
         return Image.new("RGB", (800, 480), rgb)
 

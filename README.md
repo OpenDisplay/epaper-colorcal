@@ -9,15 +9,16 @@ OpenDisplay's [`epaper-dithering`](https://github.com/OpenDisplay/epaper-ditheri
 
 ## Why
 
-The measured palettes in `epaper-dithering` (`measured_palettes.rs`) have historically been
-derived from **phone photos of a color target** — a method that produces wildly varying
+The measured palettes OpenDisplay ships (the `epaper-palette` files in py-opendisplay's
+`src/opendisplay/palettes/`) have historically been derived from **phone photos of a color target** — a method that produces wildly varying
 results because of camera, lighting and RAW-processing variance. The CR30 is a cheap (~€55)
 but genuinely **spectral** pocket colorimeter (45°/0° geometry, 4 mm aperture, 31 bands
 400–700 nm at 10 nm). It brings its own controlled illumination, so room lighting is
 irrelevant, and it reports the panel's actual spectral reflectance.
 
-This tool reads that reflectance and emits a ready-to-paste Rust `Palette` block (sRGB under
-D65/2° to match the dithering pipeline), plus a JSON sidecar of the raw spectra.
+This tool reads that reflectance and emits an `epaper-palette` JSON file, the palette format
+of `epaper-dithering` 7 (CIE Lab under D65/2°, normalised to the panel's white), plus a JSON
+sidecar of the raw spectra.
 
 > **The 31-band spectral reflectance is the physical ceiling** — everything else (XYZ, Lab,
 > sRGB under any illuminant) is computed from it. No further reverse engineering of the device
@@ -65,20 +66,21 @@ shape before a device arrives.
    ```bash
    uv run epaper-colorcal \
      --scheme BWGBRY \
-     --id SPECTRA_13_3_6COLOR \
+     --id spectra6_13in3 \
+     --note "Spectra 6 13.3in T133A01" \
      --port /dev/tty.usbserial-1234 \
      --temp 23 \
      --count 5 \
-     --out spectra/spectra_13_3_6color.json
+     --out spectra/spectra6_13in3.json \
+     > spectra6_13in3.json
    ```
 
    For each color: fill the panel with that solid color, seat the CR30 flat against it, press
    Enter. It averages `--count` reads.
 
-5. **Paste the output** into `epaper-dithering`:
-   - the `pub static <ID>: Palette { … }` block → `packages/rust/core/src/measured_palettes.rs`
-   - the `MeasuredPaletteEntry { … }` → the `CATALOG` slice in the same file
-   - the two reminder lines → `palettes.py` and `__init__.py`
+5. **Add the palette file** to py-opendisplay: copy it into `src/opendisplay/palettes/` and
+   add one line for the panel to `MEASURED_PALETTE_FILES` in `display_palettes.py`. Any other
+   `epaper-dithering` user can load it directly with `Palette.load(path)`.
 
 The raw spectra JSON sidecar is kept for re-processing later (e.g. defining a per-panel gamut
 volume in XYZ) without re-measuring.
@@ -93,7 +95,7 @@ after each. Same panel spot, same scanner seating for every color, so results ar
 pip install 'epaper-colorcal[opendisplay]'   # adds py-opendisplay (BLE)
 
 uv run epaper-colorcal \
-  --scheme BWGBRY --id SPECTRA_7_3_6COLOR --temp 23 \
+  --scheme BWGBRY --id spectra6_7in3 --temp 23 \
   --interactive \
   --address <BLE-address> \
   --port /dev/tty.usbserial-1234 \
@@ -107,13 +109,12 @@ Try it without any hardware:
 uv run epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
 ```
 
-> **Status: scaffold.** The orchestration and dry-run simulation work and are tested. Two parts
-> are marked `HARDWARE TODO` in `interactive.py` and must be validated on a real panel before
-> trusting the output:
-> 1. **Push the palette *index*, not RGB** — measuring ink *k* must bypass measured-palette
->    remapping, or the result is circular (measuring through the palette you're measuring).
-> 2. **Refresh settle time** — `upload_image` returns when data is sent, not when the e-paper
->    has physically settled; `--settle` needs tuning against a real panel.
+> **Status: scaffold.** The orchestration and dry-run simulation work and are tested. Each ink
+> is shown as its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always maps to
+> that ink, so the measurement never goes through the palette being measured. One part is
+> marked `HARDWARE TODO` in `interactive.py` and must be validated on a real panel: the
+> **refresh settle time**. `upload_image` returns when data is sent, not when the e-paper has
+> physically settled, so `--settle` needs tuning against a real panel.
 
 When the CR30 arrives, follow [`docs/handoff-when-device-arrives.md`](docs/handoff-when-device-arrives.md)
 — a step-by-step checklist for validating the protocol, pinning the reflectance scale, finishing
@@ -121,25 +122,33 @@ interactive mode, and measuring the priority panels.
 
 ## Output
 
-```rust
-/// Measured 2026-06-29, CHNSpec CR30 (s/n CR30-xxxx), sRGB under D65/2°, panel @ 23°C.
-pub static SPECTRA_13_3_6COLOR: Palette = Palette {
-    colors: Cow::Borrowed(&[
-        [ 31,  24,  41],  // black   L*a*b* D50 [19.1, 0.3, -0.3]
-        ...
-    ]),
-    accent_idx: 3, // red
-};
+stdout is an `epaper-palette` file (all prompts and notes go to stderr):
+
+```json
+{
+  "format": "epaper-palette",
+  "version": 1,
+  "measured": true,
+  "source": "Spectra 6 13.3in T133A01; CHNSpec CR30 s/n CR30-xxxx, measured 2026-06-29, D65/2°, panel at 23°C",
+  "entries": [
+    { "appearance": [17.9, 11.4, -12.3], "name": "black", "nominal": "#000000" },
+    { "appearance": [100.0, 0.0, 0.0], "name": "white", "nominal": "#ffffff" },
+    ...
+  ]
+}
 ```
 
-sRGB is **D65/2°** to match `epaper-dithering`'s `color_space_lab.rs`; the per-color
-`L*a*b*` in the comment is **D50/2°** for comparison with manufacturer datasheets (which use
-a 45°/0°, D50 spectrophotometer configuration).
+Each `appearance` is the measured CIE Lab under **D65/2°**, the space `epaper-dithering` works
+in, taken before any sRGB clamping so inks outside sRGB keep their true colour. The palette is
+built with `epaper_dithering.Palette.from_absolute_lab`, which normalises it so the panel's white
+is L\* 100, a\* = b\* = 0. The sidecar also records each colour's sRGB and its **D50/2°** Lab,
+for comparison with manufacturer datasheets (which use a 45°/0°, D50 spectrophotometer
+configuration).
 
 ## Schemes
 
-`MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY` — color order, accent index and firmware id mirror
-`epaper-dithering`'s `measured_palettes.rs` / `palettes.py`.
+`MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY` — color order is the firmware's index order, the same as
+py-opendisplay's palette files.
 
 ## Temperature & the bigger picture
 

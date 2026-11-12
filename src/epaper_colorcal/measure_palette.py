@@ -1,12 +1,12 @@
 """CLI: measure a panel's colors with a CR30 and emit a measured palette.
 
 Walks each color of a scheme in firmware order, averages several SPD reads, and
-prints a ready-to-paste ``measured_palettes.rs`` block (+ CATALOG entry + Python
-reminder). ``--dry-run`` synthesises spectra so the whole pipeline runs with no
-hardware.
+prints the measured palette as an ``epaper-palette`` JSON document on stdout (all
+prompts and notes go to stderr). ``--dry-run`` synthesises spectra so the whole
+pipeline runs with no hardware.
 
 Example (no hardware):
-    epaper-colorcal --scheme BWGBRY --id SPECTRA_13_3_6COLOR --temp 23 --dry-run
+    epaper-colorcal --scheme BWGBRY --id spectra6_13in3 --temp 23 --dry-run > spectra6_13in3.json
 """
 
 from __future__ import annotations
@@ -17,12 +17,7 @@ import sys
 from collections.abc import Callable
 
 from .colorimetry import average_spds, reading_from_spd
-from .emit_rust import (
-    MeasuredColor,
-    render_full_output,
-    spectra_sidecar,
-    write_sidecar,
-)
+from .emit import MeasuredColor, render_palette, spectra_sidecar, write_sidecar
 from .schemes import Scheme, get_scheme
 from .synthetic import IDEAL_SRGB, synthetic_spd
 
@@ -134,11 +129,16 @@ async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[li
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="epaper-colorcal", description=__doc__)
     p.add_argument("--scheme", required=True, help="Color scheme: MONO, BWR, BWY, BWRY, BWGBRY")
-    p.add_argument("--id", required=True, dest="palette_id", help="Rust palette constant, e.g. SPECTRA_13_3_6COLOR")
+    p.add_argument(
+        "--id",
+        required=True,
+        dest="palette_id",
+        help="Name for this measurement, e.g. spectra6_13in3 (recorded in the sidecar)",
+    )
     p.add_argument("--port", help="Serial port of the CR30 (e.g. /dev/tty.usbserial-XXXX)")
     p.add_argument("--count", type=int, default=3, help="SPD reads to average per color (default 3)")
     p.add_argument("--temp", type=float, default=None, help="Panel temperature in °C (strongly recommended)")
-    p.add_argument("--note", default="", help="Free-text note for the Rust doc comment")
+    p.add_argument("--note", default="", help="Free-text note, e.g. the panel model, prepended to the palette's source")
     p.add_argument("--serial", default=None, help="Override the recorded instrument serial")
     p.add_argument("--out", default=None, help="Path to write the raw-spectra JSON sidecar")
     p.add_argument("--dry-run", action="store_true", help="Synthesise spectra; no hardware needed")
@@ -181,20 +181,12 @@ def main(argv: list[str] | None = None) -> int:
         colors = build_colors(scheme, provider)
         serial = args.serial or get_serial()
 
-    output = render_full_output(
-        args.palette_id,
-        scheme,
-        colors,
-        serial=serial,
-        note=args.note,
-        temperature_c=args.temp,
-    )
-    print(output)
+    print(render_palette(scheme, colors, serial=serial, note=args.note, temperature_c=args.temp))
 
     if any(c.reading.clipped for c in colors):
         print(
-            "NOTE: one or more colors were out of the sRGB gamut and clamped. The raw "
-            "spectra in the sidecar preserve the true measurement.",
+            "NOTE: one or more colors are outside sRGB. The palette keeps their measured "
+            "Lab; only the sRGB values in the sidecar are clamped.",
             file=sys.stderr,
         )
 
