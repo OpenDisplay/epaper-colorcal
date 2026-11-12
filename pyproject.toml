@@ -26,6 +26,7 @@ classifiers = [
 
 dependencies = [
     "colour-science>=0.4.4",
+    "epaper-dithering>=7,<8",
     "numpy>=1.24",
 ]
 
@@ -37,7 +38,7 @@ serial = [
 # Interactive mode: drive an OpenDisplay panel over BLE so the display cycles colors
 # while the CR30 stays put. Not needed for --dry-run / tests.
 opendisplay = [
-    "py-opendisplay>=7.9.0",
+    "py-opendisplay>=8.0.0; python_version >= '3.13'",
 ]
 [project.scripts]
 epaper-colorcal = "epaper_colorcal.measure_palette:main"

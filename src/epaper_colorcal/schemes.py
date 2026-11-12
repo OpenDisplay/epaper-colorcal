@@ -1,9 +1,8 @@
-"""Color-scheme definitions — the firmware contract shared with epaper-dithering.
+"""Color-scheme definitions — the firmware contract.
 
-Color *order*, names, accent index and the firmware scheme id MUST match
-``epaper-dithering``'s ``measured_palettes.rs`` (CATALOG ``color_names`` and
-``accent_idx``) and ``palettes.py`` (``ColorScheme`` enum values), because the
-emitted palette is pasted straight into that crate.
+Color *order* is the index order the firmware expects, and the names are the ink
+names ``epaper-dithering`` palettes use. Both MUST match ``py-opendisplay``'s
+palette files (``src/opendisplay/palettes/``), which the emitted palette joins.
 """
 
 from __future__ import annotations
@@ -15,27 +14,23 @@ from dataclasses import dataclass
 class Scheme:
     name: str
     """Our CLI / firmware name, e.g. "BWGBRY"."""
-    rust_variant: str
-    """Rust ``ColorScheme`` variant, e.g. "Bwgbry"."""
     firmware_id: int
-    """Integer value used by OpenDisplay firmware + palettes.py ColorScheme."""
+    """Integer value of the scheme in OpenDisplay firmware (``ColorScheme``)."""
     colors: tuple[str, ...]
     """Color names in measurement / firmware order."""
-    accent_idx: int
-    """Index into ``colors`` of the accent color."""
 
     @property
     def count(self) -> int:
         return len(self.colors)
 
 
-# Order and accents copied verbatim from measured_palettes.rs CATALOG.
+# Order as in py-opendisplay's palette files.
 SCHEMES: dict[str, Scheme] = {
-    "MONO": Scheme("MONO", "Mono", 0, ("black", "white"), 0),
-    "BWR": Scheme("BWR", "Bwr", 1, ("black", "white", "red"), 2),
-    "BWY": Scheme("BWY", "Bwy", 2, ("black", "white", "yellow"), 2),
-    "BWRY": Scheme("BWRY", "Bwry", 3, ("black", "white", "yellow", "red"), 3),
-    "BWGBRY": Scheme("BWGBRY", "Bwgbry", 4, ("black", "white", "yellow", "red", "blue", "green"), 3),
+    "MONO": Scheme("MONO", 0, ("black", "white")),
+    "BWR": Scheme("BWR", 1, ("black", "white", "red")),
+    "BWY": Scheme("BWY", 2, ("black", "white", "yellow")),
+    "BWRY": Scheme("BWRY", 3, ("black", "white", "yellow", "red")),
+    "BWGBRY": Scheme("BWGBRY", 4, ("black", "white", "yellow", "red", "blue", "green")),
 }
 
 
