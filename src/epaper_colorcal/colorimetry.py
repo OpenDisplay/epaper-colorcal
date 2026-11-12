@@ -6,9 +6,9 @@ illuminant-independent physical property of the panel; the colour you perceive
 depends on which illuminant you view it under. So we integrate the same
 reflectance against different illuminants for different purposes:
 
-* **sRGB under D65/2°** — to match the dithering pipeline. ``epaper-dithering``'s
-  ``color_space_lab.rs`` uses the D65 sRGB matrix (``M_RGB_XYZ``), so the measured
-  palette entries it consumes must be D65-referenced sRGB.
+* **CIE Lab under D65/2°** — to match the dithering pipeline. ``epaper-dithering``
+  palettes hold each ink's appearance as D65 Lab (``lab.rs``), so the measured palette
+  is built from this, unclamped. sRGB under D65 is kept for a quick look.
 * **CIE Lab under D50/2°** — to compare against manufacturer datasheets, which
   (per the OpenDisplay #color-calibration discussion) are quoted under a 45°/0°,
   D50 spectrophotometer configuration.
@@ -48,9 +48,11 @@ class ColorReading:
     """A single panel color resolved into the spaces we care about."""
 
     srgb: tuple[int, int, int]
-    """sRGB 0-255, D65/2°, gamut-clamped — the value pasted into measured_palettes.rs."""
+    """sRGB 0-255, D65/2°, gamut-clamped — for a quick look; the palette uses ``lab_d65``."""
+    lab_d65: tuple[float, float, float]
+    """CIE L*a*b* under D65/2°, absolute and unclamped — the palette entry's appearance."""
     lab_d50: tuple[float, float, float]
-    """CIE L*a*b* under D50/2° — for datasheet comparison (goes in the Rust comment)."""
+    """CIE L*a*b* under D50/2° — for datasheet comparison."""
     xyz_d65: tuple[float, float, float]
     """CIE XYZ (Y in 0-1, perfect diffuse white = 1.0) under D65/2°."""
     clipped: bool
@@ -102,6 +104,10 @@ def reading_from_spd(spd: list[float], wavelengths: list[float] | None = None) -
     rgb = np.clip(rgb_linear_clamped, 0.0, 1.0)
     srgb = tuple(int(round(float(c) * 255.0)) for c in rgb)
 
+    # Lab under D65 — what epaper-dithering palettes hold. Not rounded: the library
+    # normalises it to the panel's white.
+    lab_d65 = tuple(float(v) for v in colour.XYZ_to_Lab(xyz_d65, _CCS["D65"]))
+
     # Lab under D50 — datasheet reference geometry/illuminant.
     xyz_d50 = _reflectance_to_xyz(sd, "D50")
     lab = colour.XYZ_to_Lab(xyz_d50, _CCS["D50"])
@@ -109,6 +115,7 @@ def reading_from_spd(spd: list[float], wavelengths: list[float] | None = None) -
 
     return ColorReading(
         srgb=srgb,  # type: ignore[arg-type]
+        lab_d65=lab_d65,  # type: ignore[arg-type]
         lab_d50=lab_d50,  # type: ignore[arg-type]
         xyz_d65=tuple(round(float(v), 4) for v in xyz_d65),  # type: ignore[arg-type]
         clipped=clipped,
