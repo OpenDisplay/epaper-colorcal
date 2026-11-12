@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "epaper-colorcal"
-version = "0.1.0"
+version = "0.1.1"
 description = "Drive a CHNSpec CR30 spectral colorimeter to produce measured e-paper color palettes"
 readme = "README.md"
 license = "MIT"

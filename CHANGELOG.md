@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.1.0...v0.1.1) (2026-11-12)
+
+
+### Documentation
+
+* describe palette files instead of the Rust paste ([ef5def8](https://github.com/OpenDisplay/epaper-colorcal/commit/ef5def8bbe9a95646ee0fa39b6445cf24938201f))
+
 ## 0.1.0 (2026-11-12)
 
 
