@@ -10,7 +10,7 @@ from .measure_palette import build_colors, main, measure_color
 from .schemes import SCHEMES, Scheme, get_scheme
 from .synthetic import synthetic_spd
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "SCHEMES",
