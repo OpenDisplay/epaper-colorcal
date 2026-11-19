@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import date
 
 import pytest
@@ -15,11 +17,13 @@ from epaper_colorcal.schemes import Scheme, get_scheme
 from epaper_colorcal.synthetic import IDEAL_SRGB, synthetic_spd
 
 
-def test_vendored_packets_import_without_serial() -> None:
-    # The pure-Python packet layer must be importable without pyserial-asyncio.
-    from epaper_colorcal._vendor.cr30 import CR30Packet, PacketParser
-
-    assert CR30Packet is not None and PacketParser is not None
+def test_cr30_package_imports_without_transport_libraries() -> None:
+    # Dry runs and tests must not need pyserial-asyncio or bleak: both import lazily.
+    code = (
+        "import sys, epaper_colorcal.cr30, epaper_colorcal.measure_palette; "
+        "assert not {'serial_asyncio', 'bleak'} & set(sys.modules), sorted(sys.modules)"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_synthetic_spd_shape_and_range() -> None:

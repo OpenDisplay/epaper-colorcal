@@ -1,181 +1,216 @@
 # epaper-colorcal
 
-Drive a **CHNSpec CR30** spectral colorimeter to produce **measured color palettes** for
-OpenDisplay's [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering).
+Measure the real colours of an e-paper panel with a **CHNSpec CR30** colorimeter and turn them
+into a palette file for OpenDisplay's [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering).
 
 [![License](https://img.shields.io/github/license/OpenDisplay/epaper-colorcal?style=flat-square)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
 
+Seat the CR30 on the panel once; the tool shows each ink on the panel over Bluetooth, reads its
+spectral reflectance, and prints an `epaper-palette` file. With the CR30 on Bluetooth too, the
+whole measurement is wireless.
+
+```bash
+uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal \
+  --scheme BWGBRY --id spectra6_7in3 \
+  --interactive --address OD216205 --cr30-ble > spectra6_7in3.json
+```
+
 ## Why
 
-The measured palettes OpenDisplay ships (the `epaper-palette` files in py-opendisplay's
-`src/opendisplay/palettes/`) have historically been derived from **phone photos of a color target** — a method that produces wildly varying
-results because of camera, lighting and RAW-processing variance. The CR30 is a cheap (~€55)
-but genuinely **spectral** pocket colorimeter (45°/0° geometry, 4 mm aperture, 31 bands
-400–700 nm at 10 nm). It brings its own controlled illumination, so room lighting is
-irrelevant, and it reports the panel's actual spectral reflectance.
+Dithering needs to know what the panel's inks really look like. OpenDisplay's earlier palettes
+came from **phone photos of the panel**, and they vary a lot with the camera, the lighting and
+the RAW processing. The CR30 (about €55) is a pocket **spectro**colorimeter: it lights the
+sample itself at 45° and reads the reflected spectrum in 31 bands from 400 to 700 nm. Room light
+doesn't matter, and the result is the panel's physical reflectance, from which any colour space
+can be computed.
 
-This tool reads that reflectance and emits an `epaper-palette` JSON file, the palette format
-of `epaper-dithering` 7 (CIE Lab under D65/2°, normalised to the panel's white), plus a JSON
-sidecar of the raw spectra.
+How good is it? On our unit the colour we compute from its spectrum matches the CR30's own
+display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1**.
 
-> **The 31-band spectral reflectance is the physical ceiling** — everything else (XYZ, Lab,
-> sRGB under any illuminant) is computed from it. No further reverse engineering of the device
-> is needed for color quality.
+## What you need
+
+- A **CHNSpec CR30**, connected over **USB** or **Bluetooth**.
+- For automatic measurement: the panel on an **OpenDisplay board** reachable over Bluetooth.
+  Without one you can show each ink yourself (manual mode).
+- Python 3.11+ (3.13+ for automatic mode, which needs `py-opendisplay`).
 
 ## Install
 
-```bash
-# clone, then:
-uv sync --all-extras          # dev + test (default) + serial + opendisplay
-# or, to actually talk to the device:
-uv sync --extra serial
-```
-
-`colour-science` + `numpy` are the only runtime deps. Talking to the physical CR30 also needs
-`pyserial-asyncio` (the `serial` extra). The `--dry-run` path and the test suite need neither.
-
-## Quick start (no hardware)
+Nothing to install with [uv](https://docs.astral.sh/uv/): `uvx` runs the tool from PyPI in a
+throwaway environment. Name the extras you need (below):
 
 ```bash
-uv run epaper-colorcal --scheme BWGBRY --id SPECTRA_13_3_6COLOR --temp 23 --dry-run
+# Automatic mode, everything over Bluetooth (py-opendisplay needs Python 3.13+)
+uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal --help
+
+# Manual mode, CR30 on USB
+uvx --from 'epaper-colorcal[serial]' epaper-colorcal --help
 ```
 
-This synthesises spectra and prints a complete, valid palette block so you can see the output
-shape before a device arrives.
+To install it instead: `uv tool install --python 3.13 'epaper-colorcal[ble,opendisplay]'` (or `pip install`),
+then run `epaper-colorcal`. For development, clone the repo and `uv sync --all-extras`.
 
-## Measuring a real panel
+The extras:
 
-1. **Show each solid ink.** Fill the screen with the ink's nominal colour (`#ff0000` for red,
-   ...) and send it undithered, e.g. `opendisplay upload --dither-mode none`. The patch must be
-   larger than the CR30's 8 mm reading window. Interactive mode does this for you.
+| Extra | Adds | Needed for |
+|---|---|---|
+| `serial` | `pyserial-asyncio` | the CR30 over USB (`--port`) |
+| `ble` | `bleak` | the CR30 over Bluetooth (`--cr30-ble`) |
+| `opendisplay` | `py-opendisplay` | automatic mode (`--interactive`) |
 
-2. **Connect the CR30 over USB** and find its serial port:
-   - macOS: `ls /dev/tty.usbserial-*`
-   - Linux: `ls /dev/ttyUSB*`
+`--dry-run` and the tests need none of them.
 
-3. **Note the panel temperature.** e-paper color is temperature-dependent — cold panels shift
-   noticeably and even select a different LUT (see OpenDisplay #color-calibration). Always pass
-   `--temp <°C>`; a palette without a recorded temperature is of limited use. Indoor panels
-   realistically sit in the ~15–40 °C range.
+The commands below use `uv run epaper-colorcal` (from a clone); with `uvx` or an installed
+tool, put `uvx --from '…' epaper-colorcal` or `epaper-colorcal` in its place.
 
-4. **Run the tool.** It will walk you through black/white calibration (with the CR30's tiles),
-   then prompt for each color in firmware order:
+## Connecting the CR30
 
-   ```bash
-   uv run epaper-colorcal \
-     --scheme BWGBRY \
-     --id spectra6_13in3 \
-     --note "Spectra 6 13.3in T133A01" \
-     --port /dev/tty.usbserial-1234 \
-     --temp 23 \
-     --count 5 \
-     --out spectra/spectra6_13in3.json \
-     > spectra6_13in3.json
-   ```
+**Bluetooth:** switch the CR30 on and pass `--cr30-ble`. It finds the CR30 by scanning, or
+give its name (shown on its screen and advertised, e.g. `--cr30-ble CM454M1246`).
 
-   For each color: fill the panel with that solid color, seat the CR30 flat against it, press
-   Enter. It averages `--count` reads.
+**USB:** plug it in and pass its serial port with `--port`. The CR30 uses a CH34x USB-serial
+chip:
 
-5. **Add the palette file** to py-opendisplay: copy it into `src/opendisplay/palettes/` and
-   add one line for the panel to `MEASURED_PALETTE_FILES` in `display_palettes.py`. Any other
-   `epaper-dithering` user can load it directly with `Palette.load(path)`.
+| OS | Port |
+|---|---|
+| macOS | `/dev/tty.wchusbserial*` (or `/dev/tty.usbserial-*`) |
+| Linux | `/dev/ttyUSB0` |
+| Windows | `COM3` (check Device Manager) |
 
-The raw spectra JSON sidecar is kept for re-processing later (e.g. defining a per-panel gamut
-volume in XYZ) without re-measuring.
+**Calibration** is automatic: the CR30 calibrates against the white reference inside its cap.
+`--calibrate` runs an explicit black and white calibration first (USB only); keep the cap
+closed for both steps.
 
-## Interactive mode (automated, BLE-driven)
+## Measuring a panel
 
-Instead of manually sending each color image and repositioning the scanner, **seat the CR30 on
-the panel once and let the software cycle the display through every ink** over BLE — reading
-after each. Same panel spot, same scanner seating for every color, so results are repeatable.
+**Record the panel's temperature.** E-paper colours shift with temperature, so a palette is
+only valid near the temperature it was measured at. Pass it with `--temp`; in automatic mode,
+without `--temp`, the tool uses the temperature the OpenDisplay board advertises (its chip
+sensor, read before connecting, which is close to room temperature on an idle board).
+
+### Automatic (recommended)
+
+Seat the CR30 flat on the panel, away from the edges, and run:
 
 ```bash
-pip install 'epaper-colorcal[opendisplay]'   # adds py-opendisplay (BLE)
-
-uv run epaper-colorcal \
-  --scheme BWGBRY --id spectra6_7in3 --temp 23 \
-  --interactive \
-  --address <BLE-address> \
-  --port /dev/tty.usbserial-1234 \
-  --key <hex-key>        # only if the device requires auth
-  --settle 3             # extra seconds after the panel reports refresh complete (default 3)
+uv run epaper-colorcal --scheme BWGBRY --id spectra6_7in3 \
+  --note "Spectra 6 7.3in" \
+  --interactive --address OD216205 \
+  --cr30-ble \
+  --out spectra/spectra6_7in3.json > spectra6_7in3.json
 ```
 
-Try it without any hardware:
+For each ink the tool fills the screen with it, waits for the refresh to finish, takes `--count`
+reads (default 3) and averages them. A six-colour Spectra panel takes about 9 minutes, mostly
+panel refreshes. The CR30 stays put, so every ink is measured at the same spot.
+
+- `--address` is the OpenDisplay board's name (e.g. `OD216205`), MAC or macOS UUID.
+- `--key <hex>` if the board is encrypted.
+- Use `--port <port>` instead of `--cr30-ble` for a USB-connected CR30.
+
+Each ink is sent as its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always
+maps to that ink, so the measurement never depends on whatever palette the board already uses.
+The tool checks the screen really is one ink before uploading.
+
+### Manual
+
+Without an OpenDisplay board, show each ink yourself: fill the screen with the ink's nominal
+colour and send it **undithered**. Then:
 
 ```bash
-uv run epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
+uv run epaper-colorcal --scheme BWRY --id my_panel --temp 21 --port /dev/ttyUSB0 > my_panel.json
 ```
 
-> **Status: validated on hardware** (CR30 + Spectra 6 7.3", 2026-11-19). Each ink is shown as
-> its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always maps to that ink,
-> so the measurement never goes through the palette being measured; the tool checks the
-> screen is a single ink before uploading. The upload returns only after the panel reports
-> refresh complete, so `--settle` is just a small margin. `--address` takes a MAC, a macOS
-> UUID or the advertised name.
+The tool asks for each ink in order. Show it, seat the CR30, press Enter.
 
-When the CR30 arrives, follow [`docs/handoff-when-device-arrives.md`](docs/handoff-when-device-arrives.md)
-— a step-by-step checklist for validating the protocol, pinning the reflectance scale, finishing
-interactive mode, and measuring the priority panels.
+### Try it without hardware
+
+```bash
+uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --dry-run
+uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
+```
 
 ## Output
 
-stdout is an `epaper-palette` file (all prompts and notes go to stderr):
+stdout is an `epaper-palette` file, ready for `epaper-dithering` 7 (prompts and notes go to stderr):
 
 ```json
 {
   "format": "epaper-palette",
   "version": 1,
   "measured": true,
-  "source": "Spectra 6 13.3in T133A01; CHNSpec CR30 s/n CR30-xxxx, measured 2026-06-29, D65/2°, panel at 23°C",
+  "source": "Spectra 6 7.3in; CHNSpec CR30 s/n CM454M1246, measured 2026-11-19, D65/2°, panel at 18.5°C",
   "entries": [
-    { "appearance": [17.9, 11.4, -12.3], "name": "black", "nominal": "#000000" },
+    { "appearance": [25.1, 15.2, -13.4], "name": "black", "nominal": "#000000" },
     { "appearance": [100.0, 0.0, 0.0], "name": "white", "nominal": "#ffffff" },
     ...
   ]
 }
 ```
 
-Each `appearance` is the measured CIE Lab under **D65/2°**, the space `epaper-dithering` works
-in, taken before any sRGB clamping so inks outside sRGB keep their true colour. The palette is
-built with `epaper_dithering.Palette.from_absolute_lab`, which normalises it so the panel's white
-is L\* 100, a\* = b\* = 0. The sidecar also records each colour's sRGB and its **D50/2°** Lab,
-for comparison with manufacturer datasheets (which use a 45°/0°, D50 spectrophotometer
-configuration).
+Each `appearance` is CIE Lab under D65/2°, normalised so the panel's white is L\* 100 (that's
+what `epaper-dithering` expects; the tool uses its own `Palette.from_absolute_lab` to do it).
+Inks outside sRGB keep their measured colour.
 
-## Schemes
+Use it with:
 
-`MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY` — color order is the firmware's index order, the same as
-py-opendisplay's palette files.
+- **py-opendisplay**: copy the file into `src/opendisplay/palettes/` and add the panel to
+  `MEASURED_PALETTE_FILES` in `display_palettes.py`.
+- **epaper-dithering** directly: `Palette.load("spectra6_7in3.json")`.
+- To share a measurement, add it to `epaper-dithering`'s `examples/palettes/`.
 
-## Temperature & the bigger picture
+`--out` writes a sidecar with the raw spectra of every read, plus sRGB and D50 Lab per ink
+(for datasheet comparison), so a measurement can be re-processed later without re-measuring.
 
-This tool records temperature as metadata; it does not yet *compensate* for it. The intended
-follow-up is to measure a panel at a few temperatures (e.g. 15/25/35 °C) and interpolate — the
-spectra sidecars are structured to support that. Quantifying the thermal shift is exactly what a
-spectral instrument is for. See [`docs/temperature-compensation.md`](docs/temperature-compensation.md)
-for the full architecture (data + interpolation in `epaper-dithering`, runtime glue in
-`py-opendisplay`).
+## Options
+
+| Option | |
+|---|---|
+| `--scheme` | `MONO`, `BWR`, `BWY`, `BWRY` or `BWGBRY`; inks are measured in the firmware's index order |
+| `--id` | a name for the measurement (stored in the sidecar) |
+| `--temp` | panel temperature in °C (automatic mode: defaults to the board's advertised temperature) |
+| `--note` | free text put at the start of the palette's `source`, e.g. the panel model |
+| `--count` | reads averaged per ink (default 3) |
+| `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
+| `--calibrate` | explicit black/white calibration first (USB) |
+| `--interactive`, `--address`, `--key`, `--settle` | automatic mode via an OpenDisplay board |
+| `--out` | raw-spectra sidecar path |
+| `--dry-run` | synthetic spectra, no hardware |
+
+## How it works
+
+```
+CR30 (USB or BLE) ─► 31-band reflectance, % ─► colour-science: XYZ & Lab, D65/2°
+                                                     │
+                       epaper_dithering.Palette.from_absolute_lab ◄┘ ─► epaper-palette JSON
+```
+
+`epaper_colorcal.cr30` is a small, typed client for the CR30 over both transports; see
+[`docs/cr30-protocol.md`](docs/cr30-protocol.md) for the protocol. Colour maths is done here
+with [`colour-science`](https://www.colour-science.org/), not by the device.
+
+## Temperature
+
+The tool records the temperature (from `--temp` or the board); it doesn't compensate for it. Measuring a panel at a few
+temperatures and interpolating is the planned next step, and the sidecars are structured for it.
+See [`docs/temperature-compensation.md`](docs/temperature-compensation.md).
 
 ## Development
 
 ```bash
 uv sync --all-extras
 uv run pytest -q
-uv run ruff check .
-uv run mypy src/epaper_colorcal
+uv run prek run --all-files    # ruff, ruff-format, mypy (strict), pylint
 ```
 
-## Attribution
+The protocol tests replay frames captured from a real CR30 over both transports
+(`tests/fixtures/cr30_frames.json`), so they need no hardware.
 
-The CR30 serial protocol in `src/epaper_colorcal/_vendor/cr30/` is a trimmed, attributed copy
-of [`itohio/color-science`](https://github.com/itohio/color-science) (MIT) — the
-[reverse-engineering writeup](https://itohi.com/colorimetry/reverse-engineering-cr30/). Only
-the protocol/SPD-read layer is vendored; colorimetry is done here with `colour-science`. See
-`src/epaper_colorcal/_vendor/cr30/NOTICE`.
+## Credits
 
-The wire protocol is documented in [`docs/cr30-protocol.md`](docs/cr30-protocol.md). The plan
-is to replace the vendored code with our own typed, tested implementation against that spec
-once a device is available to validate it byte-for-byte.
+The CR30's USB serial protocol was reverse-engineered by **itohio**
+([write-up](https://itohi.com/colorimetry/reverse-engineering-cr30/),
+[`color-science`](https://github.com/itohio/color-science)); this project's client is its own
+implementation, built on that work and verified against a device.

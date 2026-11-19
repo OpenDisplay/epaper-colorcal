@@ -52,12 +52,32 @@ async def measure_interactive(
     for index, name in enumerate(scheme.colors):
         await panel.show_color(index, name)
         reads = [await spd_source(name) for _ in range(count)]
-        if any(a == b for a, b in zip(reads, reads[1:])):
-            # Real reads always differ in the low bits; identical ones suggest the CR30
-            # returned a stored result instead of scanning.
-            print(f"warning: {name}: consecutive CR30 reads were bit-identical (stale read?)", file=sys.stderr)
         colors.append(MeasuredColor(name=name, reading=reading_from_spd(average_spds(reads)), spds=reads))
     return colors
+
+
+# Advertised chip temperatures outside this range are treated as "no reading" (some boards
+# advertise -40 °C, the encoding's floor, when they have no valid value).
+PLAUSIBLE_BOARD_TEMP_C = (-20.0, 60.0)
+
+
+async def read_board_temperature(address: str, timeout: float = 8.0) -> float | None:
+    """The OpenDisplay board's advertised MCU temperature, read from a scan without connecting.
+
+    The chip temperature tracks room temperature while the board is idle, so it approximates
+    the panel's temperature. Read it before connecting: BLE activity warms the chip.
+    Returns None if the board isn't seen or reports an implausible value.
+    """
+    from opendisplay.discovery import (  # pylint: disable=import-outside-toplevel,import-error  # optional extra
+        discover_devices_with_adv,
+    )
+
+    wanted = address.lower()
+    for name, (mac, adv) in (await discover_devices_with_adv(timeout=timeout)).items():
+        if wanted in {name.lower(), str(mac).lower()} and adv is not None:
+            low, high = PLAUSIBLE_BOARD_TEMP_C
+            return float(adv.temperature_c) if low <= adv.temperature_c <= high else None
+    return None
 
 
 # ── Simulated panel (no hardware) ─────────────────────────────────────────────

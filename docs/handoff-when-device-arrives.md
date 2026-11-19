@@ -18,11 +18,17 @@ validated by `epaper_dithering.Palette` itself).
 > **Update 2026-11-19 — Steps 0–3 done on real hardware.** The serial protocol works
 > (handshake, 31-band read; the serial-number slice was off by one, fixed). Reflectance is
 > **percent** (0–100); the CR30's white cap reads 71–79 % (L* ≈ 90) and our Lab matched the
-> device's own screen to ΔE ≈ 0.05 without any host-side calibration. Repeatability is
+> device's own screen to ΔE ≈ 0.05 without any host-side calibration. Bit-identical
+> consecutive reads are normal (quantised output), not stale reads. Repeatability is
 > ≈ ΔE 0.1. Interactive mode measured a Spectra 6 7.3" (OD216205, panel IC 0x0023) end to
 > end at 18.5 °C: `upload_prepared_image` waits for the panel's refresh-complete, so
-> `--settle` defaults to 3 s. Result: `spectra/spectra_7_3_6color_cr30.json`. Remaining:
-> the optional BLE transport (Step 3.5), the clean reimplementation (Step 4) and the PR (Step 5).
+> `--settle` defaults to 3 s. Result: `spectra/spectra_7_3_6color_cr30.json`, merged into
+> epaper-dithering's `examples/palettes/`.
+>
+> **Steps 3.5 and 4 done too.** The CR30 works over Bluetooth (`--cr30-ble`): a scan read over
+> BLE and over USB decodes to the same bytes. The vendored code is gone; `cr30/` is our own
+> client for both transports, tested against captured frames. See `docs/cr30-protocol.md`.
+> Remaining: Step 5 (more panels, py-opendisplay).
 
 ---
 
@@ -68,16 +74,15 @@ validated by `epaper_dithering.Palette` itself).
 src/epaper_colorcal/
   colorimetry.py     SPD (percent) → absolute Lab(D65) + sRGB(D65) + Lab(D50) via colour-science
   schemes.py         MONO/BWR/BWY/BWRY/BWGBRY: ink names in palette-index order (matches py-opendisplay's palettes)
-  reader.py          CR30Reader: thin async wrapper over the vendored protocol (lazy serial import)
+  cr30/              our CR30 client: frames.py (pure encode/decode), device.py (UsbCR30, BleCR30, open_cr30)
   synthetic.py       fake SPDs for --dry-run; IDEAL_SRGB per color name
   emit.py            builds the epaper-palette (Palette.from_absolute_lab) + raw-spectra JSON sidecar
   measure_palette.py CLI: --scheme/--id/--temp/--count/--port/--dry-run + interactive flags
   interactive.py     PanelDriver protocol, SimPanel, OpenDisplayPanel (BLE), measure_interactive()
-  _vendor/cr30/      vendored protocol slice (packets/device/protocol) + NOTICE + LICENSE-itohio
 docs/
-  cr30-protocol.md   transcribed wire protocol (for the planned clean reimplementation)
+  cr30-protocol.md   the verified wire protocol, USB and BLE
   handoff-when-device-arrives.md   ← this file
-tests/               test_dry_run.py, test_interactive.py
+tests/               test_dry_run.py, test_interactive.py, test_cr30.py (+ fixtures/cr30_frames.json)
 ```
 
 Commands:
@@ -109,8 +114,18 @@ uv run epaper-colorcal --scheme BWGBRY --id test --temp 23 --interactive --dry-r
 
 ## WHEN THE CR30 ARRIVES — do this, in order
 
-### Step 0 — connect & confirm the vendored protocol actually works
-The vendored code in `_vendor/cr30/` is **unverified**. First prove it talks to the device.
+### Step 0 — connect & confirm the protocol works ✅
+*Done 2026-11-19 with the then-vendored code, which has since been replaced by `cr30/`. To
+smoke-test a CR30 today:*
+```python
+import asyncio
+from epaper_colorcal.cr30 import open_cr30
+async def go():
+    async with open_cr30(port="/dev/tty.wchusbserial120") as cr30:   # or ble="auto"
+        print(cr30.info, await cr30.measure())
+asyncio.run(go())
+```
+*Original instructions:*
 
 ```bash
 uv sync --extra serial
@@ -171,7 +186,10 @@ uv run epaper-colorcal --scheme BWGBRY --id SPECTRA_7_3_6COLOR \
 ```
 `--address` also accepts the advertised name (e.g. `OD216205`); find it via `discover_devices`. If the device requires auth, pass `--key <hex>`.
 
-### Step 3.5 (optional) — verify & implement the CR30's BLE transport
+### Step 3.5 (optional) — verify & implement the CR30's BLE transport ✅
+*Done 2026-11-19: FFE0/FFE1 confirmed; the device answers the app's short frames (not 60-byte
+ones); one checksum rule covers both transports; `0x02` fetch works, `0x05` doesn't. Implemented
+as `cr30.BleCR30`. Original plan:*
 The CR30's Bluetooth protocol was recovered from the official Android app
 (write-up not yet published) but never tested. This
 is what makes wireless (cable-free) measurement possible. Do it in order:
@@ -189,7 +207,8 @@ is what makes wireless (cable-free) measurement possible. Do it in order:
    SPD **byte-for-byte** against the serial `CR30Reader`. Once validated, fold it into the package
    as a BLE sibling of `CR30Reader` reusing the same frame parser.
 
-### Step 4 (optional) — replace the vendored slice with our own
+### Step 4 (optional) — replace the vendored slice with our own ✅
+*Done 2026-11-19: `_vendor/` deleted; credit kept in the README and `docs/cr30-protocol.md`.*
 Per `docs/cr30-protocol.md`'s reimplementation plan: write a typed `cr30/` against the spec,
 diff its decoded SPDs **byte-for-byte** against the vendored code AND the device, add frame
 build/parse/checksum unit tests, then delete `_vendor/cr30/` and keep only a credit to the

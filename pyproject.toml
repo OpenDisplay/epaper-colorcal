@@ -31,9 +31,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Talking to the physical CR30 over serial. Not needed for --dry-run / tests.
+# Talking to the physical CR30 over USB serial. Not needed for --dry-run / tests.
 serial = [
     "pyserial-asyncio>=0.6",
+]
+# Talking to the physical CR30 over Bluetooth LE (--cr30-ble).
+ble = [
+    "bleak>=0.22",
 ]
 # Interactive mode: drive an OpenDisplay panel over BLE so the display cycles colors
 # while the CR30 stays put. Not needed for --dry-run / tests.
@@ -54,10 +58,6 @@ packages = ["src/epaper_colorcal"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-# Vendored upstream code (itohio/color-science, MIT) is kept verbatim — don't lint it.
-# force-exclude makes ruff honor this even for files passed explicitly (e.g. by pre-commit).
-extend-exclude = ["src/epaper_colorcal/_vendor"]
-force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -69,24 +69,12 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-# Vendored upstream code is untyped; exclude it and the third-party libs without stubs.
-exclude = ["src/epaper_colorcal/_vendor/"]
 
 [[tool.mypy.overrides]]
 # colour-science has no stubs; opendisplay/epaper_dithering/PIL are only present with the
 # optional `opendisplay` extra (interactive mode), so don't require them for type-checking.
-module = ["colour.*", "opendisplay.*", "epaper_dithering.*", "PIL.*"]
+module = ["colour.*", "opendisplay.*", "epaper_dithering.*", "PIL.*", "serial_asyncio.*", "bleak.*"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# Vendored protocol slice is untyped; treat its symbols as Any rather than checking it.
-module = ["epaper_colorcal._vendor.*"]
-follow_imports = "skip"
-ignore_missing_imports = true
-
-[tool.pylint.main]
-# Vendored upstream code is kept verbatim — don't lint it.
-ignore-paths = ["src/epaper_colorcal/_vendor/.*"]
 
 [tool.pylint.format]
 max-line-length = 120
