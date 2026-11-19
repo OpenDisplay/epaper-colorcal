@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.4.0...v0.5.0) (2026-11-19)
+
+
+### Features
+
+* read a printed ArgyllCMS chart for an ICC printer profile ([6e57f43](https://github.com/OpenDisplay/epaper-colorcal/commit/6e57f43144a2e5a14f2ebf11759820c3191de2f2))
+* read chart patches in printed order, and document printer profiling ([b5f3c20](https://github.com/OpenDisplay/epaper-colorcal/commit/b5f3c20f7f6f21e62815280faa9770939512bd66))
+* show the inks on ATC BLE tags directly over Bluetooth ([5fded2d](https://github.com/OpenDisplay/epaper-colorcal/commit/5fded2d9f0dd1b9fad86daa697a909f976cd9725))
+
+
+### Bug Fixes
+
+* match ATC tag names sent with a trailing NUL ([c96c76f](https://github.com/OpenDisplay/epaper-colorcal/commit/c96c76fd622367ae4de048d4a17f66559f147d8b))
+
+
+### Documentation
+
+* badges right under the title ([c6945de](https://github.com/OpenDisplay/epaper-colorcal/commit/c6945de5143d565f0eb440a9def26bfc5f3ebb29))
+* bring the README up to date ([6ff63be](https://github.com/OpenDisplay/epaper-colorcal/commit/6ff63bea4913509653aa52bed976738b7dabe8b7))
+* present the tool as general, not OpenDisplay-first ([15e4e8e](https://github.com/OpenDisplay/epaper-colorcal/commit/15e4e8ecb9d67c78c0b170bc18d0c27c668e50ca))
+* treat the CR30 as one instrument, not the instrument ([f6120b5](https://github.com/OpenDisplay/epaper-colorcal/commit/f6120b528606f605379d4a444b8059e69ad791d3))
+
 ## [0.4.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.3.0...v0.4.0) (2026-11-19)
 
 

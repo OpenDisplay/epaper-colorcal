@@ -12,7 +12,7 @@ from .schemes import SCHEMES, Ink, Scheme, get_scheme, parse_inks
 from .spectrum import Spectrum
 from .synthetic import synthetic_spd
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "SCHEMES",
