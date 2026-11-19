@@ -52,7 +52,7 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
 | Display | Option | Status |
 |---|---|---|
 | OpenDisplay boards | `--address` | verified on a Spectra 6 7.3" (BWGBRY, firmware 2.27); other schemes use the same path but are untested |
-| OpenEPaperLink tags | `--oepl-ap`, `--oepl-tag` | through the access point, with [py-oepl](https://pypi.org/project/py-oepl/); not yet verified on a tag |
+| OpenEPaperLink tags | `--oepl-ap`, `--oepl-tag` | through the access point, with [py-oepl](https://pypi.org/project/py-oepl/); verified on an M2 2.6" (BWR) |
 | Anything you can script | `--show-command` | works with any panel; the command is yours |
 | By hand | (default) | works with any panel |
 
@@ -118,7 +118,10 @@ board, the tool otherwise uses the temperature the board advertises (its chip se
 before connecting, which is close to room temperature on an idle board).
 
 Seat the CR30 flat on the panel, away from the edges. The tool shows each ink, takes `--count`
-reads (default 3) and averages them. How each ink gets onto the panel is up to you:
+reads (default 3) and averages them. Unless the display reports when its refresh has finished
+(OpenDisplay boards do), the tool first reads until the colour holds steady (four reads a second
+apart within ΔE 1), so a panel that is still refreshing is never measured. How each ink gets onto
+the panel is up to you:
 
 ### With an OpenDisplay board (automatic)
 
@@ -147,10 +150,13 @@ uv run epaper-colorcal --id m3_3in0_bwry --oepl-ap 192.168.1.100 --oepl-tag 0000
 ```
 
 The tag reports its colours (in its own order) and temperature. Each ink is uploaded as a solid,
-undithered image; the tag picks it up at its next check-in, and the tool waits until the tag
-reports it drawn, so a sweep takes about one check-in interval per colour (`--oepl-timeout`,
-default 300 s per colour). The upload sets the tag's content mode to "external image", as any
-image upload does.
+undithered image, which the tag picks up at its next check-in (`--oepl-timeout`, default 300 s
+per colour); the tool then reads until the colour is stable, since the tag refreshes after it
+has received the image. A three-colour tag took about 3 minutes.
+
+The refresh waveform changes the colours, red most of all, so the tag is measured with the
+**full refresh** (`--oepl-lut full`, the default). Its own refresh setting and content mode are
+restored afterwards; the panel keeps showing the last ink until it gets its next image.
 
 `--format oepl` prints a `perceptual` block for the tag's type, see [Output](#output).
 
@@ -268,7 +274,7 @@ whatever `--format` prints.
 | `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
 | `--calibrate` | explicit black/white calibration first (USB) |
 | `--address`, `--key` | show the inks on an OpenDisplay board |
-| `--oepl-ap`, `--oepl-tag`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag |
+| `--oepl-ap`, `--oepl-tag`, `--oepl-lut`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag |
 | `--show-command` | show the inks by running a command |
 | `--settle` | seconds to wait after an ink is shown, before reading (default 3) |
 | `--format` | `epaper-palette` (default), `oepl` or `spectra` |

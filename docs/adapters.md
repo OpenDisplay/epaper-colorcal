@@ -51,9 +51,13 @@ What `show()` must guarantee:
   nominal colour maps to the ink itself, never through a measured palette: that would make the
   measurement circular. (The OpenDisplay adapter checks that the image it uploads is a single
   ink.)
-- **It returns once the panel has settled.** E-paper refreshes take seconds and flash on the
-  way. If the device tells you when the refresh is done, wait for that; otherwise wait long
-  enough, and make `--settle` configurable.
+- **Say whether it returns after the refresh.** E-paper refreshes take seconds and flash on the
+  way. If the device tells you when the refresh has finished and `show()` waits for that, set
+  `settled_after_show = True`. Otherwise leave it `False`: the loop then reads until the colour
+  is stable before measuring (`measure.wait_until_settled`).
+- **Use the panel's best refresh.** Fast or partial waveforms show weaker colours. If the device
+  lets you choose, measure with its full refresh, and restore the device's own setting in
+  `close()`, as `OEPLDisplay` does.
 - `index` is the ink's position in the scheme, which for preset schemes is the firmware's
   palette index.
 
