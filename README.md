@@ -48,9 +48,9 @@ maths, and repeated reads of a panel agree to about **ΔE 0.1**.
 | Instrument | Connection | Status |
 |---|---|---|
 | CHNSpec CR30 | USB (`--port`), Bluetooth (`--cr30-ble`) | verified (software V11.3.0.0.20231219) |
+| Instruments ArgyllCMS supports, e.g. X-Rite i1Pro | `--argyll`, through ArgyllCMS's `spotread` | not yet verified on an instrument |
 
-Other instruments, such as an X-Rite i1Pro, fit the same interface: see
-[`docs/adapters.md`](docs/adapters.md).
+More can be added as adapters: see [`docs/adapters.md`](docs/adapters.md).
 
 **Showing the inks on the panel**
 
@@ -108,6 +108,20 @@ differs.
 
 The CR30 switches itself off when idle. If it stops answering, press its button; for long
 sessions, plug in USB to charge it.
+
+### Instruments ArgyllCMS supports (e.g. X-Rite i1Pro)
+
+With [ArgyllCMS](https://www.argyllcms.com/) installed (`brew install argyll-cms`), `--argyll`
+uses any reflective instrument it supports, through its `spotread` tool: one `spotread` run per
+reading, whose saved spectrum the tool reads. At the start it asks for the instrument to be put
+on its white calibration tile.
+
+- `--argyll-port N` picks the instrument if several are connected (`spotread -?` lists them).
+- `--argyll-filter M0|M1|M2` sets the measurement condition, on instruments with filters.
+- `--argyll-hires` asks for the high-resolution spectrum, if the instrument has one.
+
+Spectra keep the instrument's own range (e.g. 380–730 nm), and everything else works as with
+the CR30.
 
 ## Measuring a panel
 
@@ -309,6 +323,7 @@ colprof -v -D "Printer X, paper Y" mychart                                  # ->
 | `--note` | free text at the start of the palette's `source`, e.g. the panel model |
 | `--count` | reads averaged per ink (default 3) |
 | `--port` / `--cr30-ble [NAME]` | instrument: the CR30 over USB / Bluetooth |
+| `--argyll` (`--argyll-port`, `--argyll-filter`, `--argyll-hires`) | instrument: one ArgyllCMS supports, through `spotread` |
 | `--calibrate` | explicit black/white calibration first (CR30 over USB) |
 | `--address`, `--key` | show the inks on an OpenDisplay board |
 | `--oepl-ap`, `--oepl-tag`, `--oepl-lut`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag through its access point |
@@ -332,8 +347,8 @@ The measurement loop (`measure.py`) joins three kinds of adapter:
 
 - **instruments** (`epaper_colorcal.instruments`) return a reflectance `Spectrum` on their own
   wavelength grid, so any range and step works: the CR30 over USB or Bluetooth
-  (`epaper_colorcal.cr30`, protocol in [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a
-  synthetic one for dry runs;
+  (`epaper_colorcal.cr30`, protocol in [`docs/cr30-protocol.md`](docs/cr30-protocol.md)),
+  instruments ArgyllCMS supports (`epaper_colorcal.argyll`), and a synthetic one for dry runs;
 - **displays** (`epaper_colorcal.displays`) show one ink at a time and may report the panel's
   inks and temperature: OpenDisplay, OpenEPaperLink (access point or ATC BLE), command, manual
   and simulated;

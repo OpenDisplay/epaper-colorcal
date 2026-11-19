@@ -170,8 +170,6 @@ Then measure a real panel end to end, and say in the PR which device and panel y
 
 ## Candidates
 
-- **X-Rite i1Pro** (instrument), e.g. through ArgyllCMS (`spotread`) or X-Rite's SDK. Its
-  spectral range differs from the CR30's, which the instrument port handles.
 - **OpenDisplay firmware 3.0** (display and output): read a mode's `0xB0` colour list as its
   `scheme()`, including multi-pass mixes, and write the measured colours back with the "measured
   on this unit" flag, once py-opendisplay supports 3.0.

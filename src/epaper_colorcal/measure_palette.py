@@ -22,6 +22,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from .emit import MeasuredColor
+from .instrument_options import add_instrument_options, chosen, describe_connection, open_instrument
 from .measure import measure_all, measure_color
 from .outputs import OUTPUTS, Measurement, get_output
 from .schemes import SCHEMES, Scheme, get_scheme, parse_inks
@@ -66,9 +67,7 @@ def _instrument(args: argparse.Namespace, display: Display) -> Instrument:
     if args.dry_run:
         assert isinstance(display, SimDisplay)
         return SyntheticInstrument(display)
-    from .cr30 import open_cr30
-
-    return open_cr30(port=args.port, ble=args.cr30_ble)
+    return open_instrument(args)
 
 
 async def _connect_instrument(args: argparse.Namespace, instrument: Instrument) -> None:
@@ -76,7 +75,7 @@ async def _connect_instrument(args: argparse.Namespace, instrument: Instrument) 
     await instrument.connect()
     if args.dry_run:
         return
-    via = f"USB {args.port}" if args.port else "BLE"
+    via = describe_connection(args)
     print(f"Connected to {instrument.description} (s/n {instrument.serial_number}) over {via}.", file=sys.stderr)
 
     if args.calibrate:
@@ -156,15 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, help="Also write the raw spectra (JSON) to this file")
     p.add_argument("--dry-run", action="store_true", help="Synthetic spectra and a simulated panel; no hardware")
 
-    cr30 = p.add_argument_group("the CR30").add_mutually_exclusive_group()
-    cr30.add_argument("--port", help="USB serial port of the CR30 (e.g. /dev/tty.wchusbserial120)")
-    cr30.add_argument(
-        "--cr30-ble",
-        nargs="?",
-        const="auto",
-        metavar="NAME",
-        help="Use the CR30 over Bluetooth: its name/address, or no value to find it by scanning",
-    )
+    add_instrument_options(p)
     p.add_argument(
         "--calibrate",
         action="store_true",
@@ -217,8 +208,10 @@ def _check_args(args: argparse.Namespace) -> str | None:
         return "--oepl-ap and --oepl-tag go together"
     if args.static and (args.address or args.atc or args.oepl_ap or args.show_command):
         return "--static is for samples shown by hand, not with a display that shows the inks itself"
-    if not args.dry_run and not (args.port or args.cr30_ble):
-        return "connect an instrument: --port or --cr30-ble for the CR30 (or use --dry-run)"
+    if not args.dry_run and not chosen(args):
+        return "connect an instrument: --port or --cr30-ble for the CR30, --argyll for ArgyllCMS (or use --dry-run)"
+    if args.calibrate and args.argyll:
+        return "--calibrate is for the CR30; an ArgyllCMS instrument calibrates when it connects"
     return None
 
 
@@ -244,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         scheme, colors, instrument = asyncio.run(_measure(args, requested))
-    except TimeoutError as exc:  # the display's and instrument's cleanup has already run
+    except (TimeoutError, RuntimeError) as exc:  # the display's and instrument's cleanup has already run
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except (asyncio.CancelledError, KeyboardInterrupt):
