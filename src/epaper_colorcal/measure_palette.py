@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import pathlib
+import signal
 import sys
 from typing import TYPE_CHECKING
 
@@ -96,6 +98,13 @@ def _resolve_scheme(requested: Scheme | None, declared: Scheme | None) -> Scheme
 async def _measure(
     args: argparse.Namespace, requested: Scheme | None
 ) -> tuple[Scheme, list[MeasuredColor], Instrument]:
+    # Stopping the tool (SIGTERM, like Ctrl-C) cancels the measurement, so the finally blocks
+    # below still run and e.g. an OEPL tag gets its settings back.
+    task = asyncio.current_task()
+    if task is not None:
+        with contextlib.suppress(NotImplementedError, RuntimeError):  # not on Windows
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+
     display = _display(args)
     if args.temp is None:
         args.temp = await display.temperature()
@@ -187,21 +196,26 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _check_args(args: argparse.Namespace) -> str | None:
+    """What's wrong with the arguments, if anything."""
+    if sum(bool(x) for x in (args.address, args.oepl_ap, args.show_command)) > 1:
+        return "--address, --oepl-ap and --show-command all show the inks; pick one"
+    if bool(args.oepl_ap) != bool(args.oepl_tag):
+        return "--oepl-ap and --oepl-tag go together"
+    if not args.dry_run and not (args.port or args.cr30_ble):
+        return "connect the CR30 with --port or --cr30-ble (or use --dry-run)"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if sum(bool(x) for x in (args.address, args.oepl_ap, args.show_command)) > 1:
-        print("error: --address, --oepl-ap and --show-command all show the inks; pick one", file=sys.stderr)
-        return 2
-    if bool(args.oepl_ap) != bool(args.oepl_tag):
-        print("error: --oepl-ap and --oepl-tag go together", file=sys.stderr)
-        return 2
-    if not args.dry_run and not (args.port or args.cr30_ble):
-        print("error: connect the CR30 with --port or --cr30-ble (or use --dry-run)", file=sys.stderr)
-        return 2
+    problem = _check_args(args)
     try:
         requested = get_scheme(args.scheme) if args.scheme else parse_inks(args.inks) if args.inks else None
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        problem = problem or str(exc)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
         return 2
 
     try:
@@ -209,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     except TimeoutError as exc:  # the display's and instrument's cleanup has already run
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        print("Stopped. The display and instrument were closed (an OEPL tag got its settings back).", file=sys.stderr)
+        return 130
     serial = args.serial or instrument.serial_number
 
     if args.temp is None:
