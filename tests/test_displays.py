@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OpenDisplayDisplay, SimDisplay
+from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
 from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
 from epaper_colorcal.instruments import SyntheticInstrument
 from epaper_colorcal.measure import measure_all
@@ -293,3 +293,101 @@ def test_displays_import_without_optional_packages() -> None:
         "assert not {'opendisplay', 'bleak'} & set(sys.modules), sorted(sys.modules)"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+# ── OpenEPaperLink ──────────────────────────────────────────────────────────
+
+
+class _FakeOEPL:
+    """Stands in for oepl.OEPLClient; one BWRY tag of type 0x2A."""
+
+    def __init__(self, temperature: int = 24, known: bool = True) -> None:
+        self.temperature, self.known = temperature, known
+        self.connected = False
+        self.uploads: list[tuple[object, dict]] = []
+        self.disconnects = 0
+
+    async def connect(self) -> None:
+        self.connected = True
+
+    async def disconnect(self) -> None:
+        self.connected = False
+        self.disconnects += 1
+
+    async def get_tag(self, mac: str):
+        if not self.known:
+            return None
+        return type("Tag", (), {"mac": mac, "hw_type": 0x2A, "temperature": self.temperature})()
+
+    async def get_tag_type(self, hw_type: int):
+        table = {"white": [255, 255, 255], "black": [0, 0, 0], "red": [255, 0, 0], "yellow": [255, 255, 0]}
+        return type("TagType", (), {"name": 'M3 3.0" BWRY', "width": 400, "height": 168, "color_table": table})()
+
+    def tag(self, mac: str):
+        client = self
+
+        class _Handle:
+            async def upload_image(self, image, **kwargs):
+                client.uploads.append((image, kwargs))
+
+        return _Handle()
+
+
+@pytest.fixture
+def fake_oepl(monkeypatch):
+    clients: list[_FakeOEPL] = []
+
+    def make(*, temperature: int = 24, known: bool = True):
+        def factory(host: str) -> _FakeOEPL:
+            clients.append(_FakeOEPL(temperature, known))
+            return clients[-1]
+
+        monkeypatch.setattr("epaper_colorcal.displays.oepl._client", factory)
+        return clients
+
+    return make
+
+
+async def test_oepl_reports_the_tag_s_colours_in_its_order(fake_oepl) -> None:
+    fake_oepl()
+    display = OEPLDisplay("ap.local", "00:00:7E:A6:74:21:94:91")
+    await display.connect()
+    scheme = await display.scheme()
+    assert scheme is not None and scheme.name == 'OEPL M3 3.0" BWRY'
+    assert [(i.name, i.nominal) for i in scheme.inks] == [
+        ("white", "#ffffff"),
+        ("black", "#000000"),
+        ("red", "#ff0000"),
+        ("yellow", "#ffff00"),
+    ]
+
+
+async def test_oepl_uploads_a_solid_undithered_image_and_waits_for_the_redraw(fake_oepl) -> None:
+    clients = fake_oepl()
+    display = OEPLDisplay("ap.local", "00007ea674219491", wait_timeout=120)
+    await display.connect()
+    await display.show(3, Ink("yellow", "#ffff00"))
+    image, kwargs = clients[-1].uploads[0]
+    assert image.size == (400, 168) and image.getcolors() == [(400 * 168, (255, 255, 0))]
+    assert kwargs == {"fit": "cover", "dither": 0, "wait": True, "wait_timeout": 120}
+    await display.close()
+    assert not clients[-1].connected
+
+
+@pytest.mark.parametrize(("reported", "expected"), [(24, 24.0), (0, None), (-40, None)])
+async def test_oepl_temperature_from_the_tag(fake_oepl, reported: int, expected: float | None) -> None:
+    clients = fake_oepl(temperature=reported)
+    assert await OEPLDisplay("ap.local", "AA").temperature() == expected
+    assert clients[-1].disconnects == 1
+
+
+async def test_oepl_unknown_tag_is_explained(fake_oepl) -> None:
+    clients = fake_oepl(known=False)
+    with pytest.raises(SystemExit, match="doesn't know a tag"):
+        await OEPLDisplay("ap.local", "AA").connect()
+    assert not clients[-1].connected
+
+
+def test_cli_oepl_needs_both_flags(capsys) -> None:
+    assert main(["--id", "S", "--dry-run", "--oepl-ap", "ap.local"]) == 2
+    assert "go together" in capsys.readouterr().err

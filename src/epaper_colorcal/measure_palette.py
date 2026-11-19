@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import pathlib
 import sys
 from typing import TYPE_CHECKING
 
-from .emit import MeasuredColor, render_palette, spectra_sidecar, write_sidecar
+from .emit import MeasuredColor
 from .measure import measure_all, measure_color
+from .outputs import OUTPUTS, Measurement, get_output
 from .schemes import SCHEMES, Scheme, get_scheme, parse_inks
 
 if TYPE_CHECKING:
@@ -34,13 +36,15 @@ def build_colors(scheme: Scheme, provider: Callable[[str], list[list[float]]]) -
 
 
 def _display(args: argparse.Namespace) -> Display:
-    from .displays import CommandDisplay, ManualDisplay, OpenDisplayDisplay, SimDisplay
+    from .displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
 
     if args.dry_run:
         return SimDisplay()
     if args.address:
         key = bytes.fromhex(args.key) if args.key else None
         return OpenDisplayDisplay(args.address, key=key, settle_seconds=args.settle)
+    if args.oepl_ap:
+        return OEPLDisplay(args.oepl_ap, args.oepl_tag, wait_timeout=args.oepl_timeout, settle_seconds=args.settle)
     if args.show_command:
         return CommandDisplay(args.show_command, settle_seconds=args.settle)
     return ManualDisplay()
@@ -131,7 +135,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--temp", type=float, default=None, help="Panel temperature in °C (default: from the display)")
     p.add_argument("--note", default="", help="Free text put at the start of the palette's source, e.g. the panel")
     p.add_argument("--serial", default=None, help="Override the recorded instrument serial")
-    p.add_argument("--out", default=None, help="Path to write the raw-spectra JSON sidecar")
+    p.add_argument(
+        "--format",
+        choices=list(OUTPUTS),
+        default="epaper-palette",
+        help="What to print: epaper-palette (default; epaper-dithering, py-opendisplay), "
+        "oepl (a perceptual block for an OpenEPaperLink tag type) or spectra",
+    )
+    p.add_argument("--out", default=None, help="Also write the raw spectra (JSON) to this file")
     p.add_argument("--dry-run", action="store_true", help="Synthetic spectra and a simulated panel; no hardware")
 
     cr30 = p.add_argument_group("the CR30").add_mutually_exclusive_group()
@@ -152,6 +163,14 @@ def build_parser() -> argparse.ArgumentParser:
     show = p.add_argument_group("showing the inks (default: you show each one and press Enter)")
     show.add_argument("--address", help="Drive this OpenDisplay board over Bluetooth (name, MAC or macOS UUID)")
     show.add_argument("--key", help="The OpenDisplay board's encryption key as hex, if it has one")
+    show.add_argument("--oepl-ap", metavar="HOST", help="Show the inks on an OpenEPaperLink tag through this AP")
+    show.add_argument("--oepl-tag", metavar="MAC", help="The OpenEPaperLink tag's MAC (with --oepl-ap)")
+    show.add_argument(
+        "--oepl-timeout",
+        type=float,
+        default=300.0,
+        help="Seconds to wait for the tag to check in and redraw each ink (default 300)",
+    )
     show.add_argument(
         "--show-command",
         metavar="CMD",
@@ -167,8 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.address and args.show_command:
-        print("error: --address and --show-command both show the inks; pick one", file=sys.stderr)
+    if sum(bool(x) for x in (args.address, args.oepl_ap, args.show_command)) > 1:
+        print("error: --address, --oepl-ap and --show-command all show the inks; pick one", file=sys.stderr)
+        return 2
+    if bool(args.oepl_ap) != bool(args.oepl_tag):
+        print("error: --oepl-ap and --oepl-tag go together", file=sys.stderr)
         return 2
     if not args.dry_run and not (args.port or args.cr30_ble):
         print("error: connect the CR30 with --port or --cr30-ble (or use --dry-run)", file=sys.stderr)
@@ -188,30 +210,25 @@ def main(argv: list[str] | None = None) -> int:
             "this palette is recorded with the temperature UNRECORDED.",
             file=sys.stderr,
         )
-    print(
-        render_palette(
-            scheme, colors, serial=serial, instrument=instrument.description, note=args.note, temperature_c=args.temp
-        )
+    measurement = Measurement(
+        palette_id=args.palette_id,
+        scheme=scheme,
+        colors=colors,
+        instrument=instrument.description,
+        serial=serial,
+        temperature_c=args.temp,
+        note=args.note,
     )
+    print(get_output(args.format).render(measurement))
 
     if any(c.reading.clipped for c in colors):
         print(
-            "NOTE: one or more colours are outside sRGB. The palette keeps their measured "
-            "Lab; only the sRGB values in the sidecar are clamped.",
+            "NOTE: one or more colours are outside sRGB. Palettes keep their measured Lab; "
+            "sRGB values (the oepl format, the spectra file) are clamped.",
             file=sys.stderr,
         )
     if args.out:
-        write_sidecar(
-            args.out,
-            spectra_sidecar(
-                args.palette_id,
-                scheme,
-                colors,
-                serial=serial,
-                instrument=instrument.description,
-                temperature_c=args.temp,
-            ),
-        )
+        pathlib.Path(args.out).write_text(get_output("spectra").render(measurement) + "\n", encoding="utf-8")
         print(f"Wrote raw spectra to {args.out}", file=sys.stderr)
     return 0
 
