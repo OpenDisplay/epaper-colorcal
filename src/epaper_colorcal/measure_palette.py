@@ -45,7 +45,9 @@ def _dry_run_provider(count: int) -> SpdProvider:
     return provide
 
 
-def _hardware_provider(port: str, count: int, verbose: bool) -> tuple[SpdProvider, Callable[[], str]]:
+def _hardware_provider(
+    port: str, count: int, verbose: bool, calibrate: bool = False
+) -> tuple[SpdProvider, Callable[[], str]]:
     """Build a provider that prompts the operator and reads the CR30.
 
     Returns the provider plus a callable to fetch the device serial after connect.
@@ -59,12 +61,13 @@ def _hardware_provider(port: str, count: int, verbose: bool) -> tuple[SpdProvide
     loop.run_until_complete(reader.connect())
     print(f"Connected to {reader.model} (s/n {reader.serial_number}).", file=sys.stderr)
 
-    input("Place the CR30 on the BLACK calibration tile, then press Enter… ")
-    if not loop.run_until_complete(reader.calibrate_black()):
-        raise SystemExit("Black calibration failed.")
-    input("Place the CR30 on the WHITE calibration tile, then press Enter… ")
-    if not loop.run_until_complete(reader.calibrate_white()):
-        raise SystemExit("White calibration failed.")
+    if calibrate:
+        input("Close the CR30 cap fully (black calibration), then press Enter… ")
+        if not loop.run_until_complete(reader.calibrate_black()):
+            raise SystemExit("Black calibration failed.")
+        input("Keep the cap closed (white calibration), then press Enter… ")
+        if not loop.run_until_complete(reader.calibrate_white()):
+            raise SystemExit("White calibration failed.")
 
     def provide(name: str) -> list[list[float]]:
         input(f"Fill the panel with solid {name.upper()}, seat the CR30 against it, then press Enter… ")
@@ -102,13 +105,15 @@ async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[li
     await reader.connect()
     print(f"Connected to {reader.model} (s/n {reader.serial_number}).", file=sys.stderr)
 
-    input("Place the CR30 on the BLACK calibration tile, then press Enter… ")
-    if not await reader.calibrate_black():
-        raise SystemExit("Black calibration failed.")
-    input("Place the CR30 on the WHITE calibration tile, then press Enter… ")
-    if not await reader.calibrate_white():
-        raise SystemExit("White calibration failed.")
-    input("Now seat the CR30 flat against the panel and press Enter to start the sweep… ")
+    if args.calibrate:
+        input("Close the CR30 cap fully (black calibration), then press Enter… ")
+        if not await reader.calibrate_black():
+            raise SystemExit("Black calibration failed.")
+        input("Keep the cap closed (white calibration), then press Enter… ")
+        if not await reader.calibrate_white():
+            raise SystemExit("White calibration failed.")
+    if sys.stdin.isatty():
+        input("Seat the CR30 flat against the panel and press Enter to start the sweep… ")
 
     key = bytes.fromhex(args.key) if args.key else None
     ble_panel = OpenDisplayPanel(args.address, scheme, key=key, settle_seconds=args.settle)
@@ -140,6 +145,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--temp", type=float, default=None, help="Panel temperature in °C (strongly recommended)")
     p.add_argument("--note", default="", help="Free-text note, e.g. the panel model, prepended to the palette's source")
     p.add_argument("--serial", default=None, help="Override the recorded instrument serial")
+    p.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Run explicit black/white calibration first. The CR30 auto-calibrates against its "
+        "cap, so this is normally not needed.",
+    )
     p.add_argument("--out", default=None, help="Path to write the raw-spectra JSON sidecar")
     p.add_argument("--dry-run", action="store_true", help="Synthesise spectra; no hardware needed")
     p.add_argument("--verbose", action="store_true", help="Verbose CR30 protocol logging")
@@ -152,7 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ble.add_argument("--address", help="BLE address/name of the OpenDisplay device")
     ble.add_argument("--key", help="Device encryption key as hex, if auth is required")
-    ble.add_argument("--settle", type=float, default=25.0, help="Seconds to wait for e-paper refresh before each read")
+    ble.add_argument(
+        "--settle",
+        type=float,
+        default=3.0,
+        help="Extra seconds to wait after the panel reports refresh complete, before reading",
+    )
     return p
 
 
@@ -177,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.port:
             print("error: --port is required unless --dry-run is set", file=sys.stderr)
             return 2
-        provider, get_serial = _hardware_provider(args.port, args.count, args.verbose)
+        provider, get_serial = _hardware_provider(args.port, args.count, args.verbose, args.calibrate)
         colors = build_colors(scheme, provider)
         serial = args.serial or get_serial()
 

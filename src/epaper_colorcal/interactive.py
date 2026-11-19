@@ -14,13 +14,13 @@ Two halves:
 colorimetry as the manual path. A :class:`SimPanel` + synthetic SPD source make the
 orchestration testable with no hardware.
 
-Hardware-dependent parts are flagged ``HARDWARE TODO`` — they need a real panel + CR30
-to validate and must not be trusted until then.
+The BLE panel path was validated on a Spectra 6 7.3\" (BWGBRY) with a CR30.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -52,6 +52,10 @@ async def measure_interactive(
     for index, name in enumerate(scheme.colors):
         await panel.show_color(index, name)
         reads = [await spd_source(name) for _ in range(count)]
+        if any(a == b for a, b in zip(reads, reads[1:])):
+            # Real reads always differ in the low bits; identical ones suggest the CR30
+            # returned a stored result instead of scanning.
+            print(f"warning: {name}: consecutive CR30 reads were bit-identical (stale read?)", file=sys.stderr)
         colors.append(MeasuredColor(name=name, reading=reading_from_spd(average_spds(reads)), spds=reads))
     return colors
 
@@ -87,7 +91,7 @@ class OpenDisplayPanel:
         address: str,
         scheme: Scheme,
         key: bytes | None = None,
-        settle_seconds: float = 25.0,
+        settle_seconds: float = 3.0,
     ) -> None:
         self._address = address
         self._scheme = scheme
@@ -104,44 +108,60 @@ class OpenDisplayPanel:
                 "    pip install 'epaper-colorcal[opendisplay]'"
             ) from exc
 
-        device = OpenDisplayDevice(self._address)
+        # Accept a MAC (Linux/Windows), a CoreBluetooth UUID (macOS), or an advertised name.
+        if re.fullmatch(r"[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}|[0-9A-Fa-f-]{36}", self._address):
+            device = OpenDisplayDevice(mac_address=self._address)
+        else:
+            device = OpenDisplayDevice(device_name=self._address)
         # Manual context-manager lifecycle: the device must stay open between connect()
         # and close(), and its only open mechanism is the async context manager.
         await device.__aenter__()  # pylint: disable=unnecessary-dunder-call
         if self._key is not None:
             await device.authenticate(self._key)
         await device.interrogate()
+        if device.color_scheme.name != self._scheme.name:
+            await device.__aexit__(None, None, None)
+            raise SystemExit(
+                f"panel reports color scheme {device.color_scheme.name}, but --scheme is {self._scheme.name}"
+            )
         self._device = device
 
     async def show_color(self, index: int, name: str) -> None:
         if self._device is None:
             raise RuntimeError("connect() must be called before show_color()")
 
-        image = self._solid_ink_image(index)
-        # The image is the ink's nominal colour, which epaper-dithering always maps to that
-        # ink, so the panel shows the pure ink whatever palette the device is using.
         from epaper_dithering import DitherMode  # provided transitively by py-opendisplay
+        from opendisplay import prepare_image
 
-        await self._device.upload_image(image, dither_mode=DitherMode.NONE)
+        device = self._device
+        image = self._solid_ink_image(index, (device.width, device.height))
+        prepared = prepare_image(
+            image, config=device.config, dither_mode=DitherMode.NONE, compress=self._supports_zip()
+        )
+        n_colors = len(prepared[2].convert("RGB").getcolors(maxcolors=2) or [None, None])
+        if n_colors != 1:
+            raise RuntimeError(f"solid {name} did not quantize to a single ink (got {n_colors}+ colours)")
 
-        # HARDWARE TODO: upload_image returns when data is sent, not when the e-paper has
-        # physically settled (color refresh is ~15-30s and flashes mid-refresh). Tune this
-        # settle delay against a real panel; consider reading twice and comparing ΔE.
+        # upload_prepared_image returns only after the device reports refresh complete
+        # (DIRECT_WRITE_REFRESH_COMPLETE), so `settle` is just a small safety margin.
+        await device.upload_prepared_image(prepared)
         await asyncio.sleep(self._settle)
 
-    def _solid_ink_image(self, index: int):  # type: ignore[no-untyped-def]
-        """Build a full-screen image of the nominal colour of the scheme's ink at ``index``.
+    def _solid_ink_image(self, index: int, size: tuple[int, int] = (800, 480)):  # type: ignore[no-untyped-def]
+        """Full-screen image of the nominal colour of the scheme's ink at ``index``.
 
-        Placeholder geometry until the device reports real dimensions; sized large
-        enough to exceed the CR30's reading window after fit/scale.
+        The nominal colour is what epaper-dithering always maps to that ink, so the panel
+        shows the pure ink whatever palette the device is using (no circular measurement).
         """
         from PIL import Image
 
         from .emit import NOMINALS
 
-        rgb = NOMINALS[self._scheme.colors[index]]
-        # HARDWARE TODO: use self._device.width/height once connected.
-        return Image.new("RGB", (800, 480), rgb)
+        return Image.new("RGB", size, NOMINALS[self._scheme.colors[index]])
+
+    def _supports_zip(self) -> bool:
+        config = self._device.config
+        return bool(config.displays[0].supports_zip) if config and config.displays else True
 
     async def close(self) -> None:
         if self._device is not None:
