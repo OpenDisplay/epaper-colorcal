@@ -13,10 +13,16 @@ the remaining work.
 **measured color palettes** as `epaper-palette` JSON files, the format epaper-dithering 7 loads
 and py-opendisplay ships per panel in `src/opendisplay/palettes/`. Everything works in a
 hardware-free `--dry-run` (tests green, ruff + mypy strict clean; the palette is built and
-validated by `epaper_dithering.Palette` itself). When the device arrives, three things
-need real hardware to finish: **(1)** confirm the vendored serial protocol actually talks to
-the device, **(2)** pin down the reflectance scale, and **(3)** finish interactive (BLE) mode's
-two `HARDWARE TODO`s.
+validated by `epaper_dithering.Palette` itself).
+
+> **Update 2026-11-19 — Steps 0–3 done on real hardware.** The serial protocol works
+> (handshake, 31-band read; the serial-number slice was off by one, fixed). Reflectance is
+> **percent** (0–100); the CR30's white cap reads 71–79 % (L* ≈ 90) and our Lab matched the
+> device's own screen to ΔE ≈ 0.05 without any host-side calibration. Repeatability is
+> ≈ ΔE 0.1. Interactive mode measured a Spectra 6 7.3" (OD216205, panel IC 0x0023) end to
+> end at 18.5 °C: `upload_prepared_image` waits for the panel's refresh-complete, so
+> `--settle` defaults to 3 s. Result: `spectra/spectra_7_3_6color_cr30.json`. Remaining:
+> the optional BLE transport (Step 3.5), the clean reimplementation (Step 4) and the PR (Step 5).
 
 ---
 
@@ -45,7 +51,10 @@ two `HARDWARE TODO`s.
 2. **Vendor a thin protocol slice** of `cr30reader` (`_vendor/cr30/`), not depend on it
    (it's not on PyPI, it's a notebook research repo) — but do **our own colorimetry** with the
    maintained `colour-science` package.
-3. **No further protocol reverse engineering** — the 31-band SPD is the physical ceiling.
+3. **Serial protocol RE is complete** (31-band SPD is the physical ceiling). The CR30's **BLE**
+   protocol has since been recovered from the official Android app (write-up
+   not yet published) but is **pending
+   hardware verification** — see the BLE checklist under "When the CR30 arrives".
 4. **Emit sRGB under D65/2°** to match `epaper-dithering`'s `color_space_lab.rs` (its
    `M_RGB_XYZ` is D65); **also record D50/2° Lab** per color for datasheet comparison.
 5. **Temperature is first-class metadata** (`--temp`) — e-paper color is temperature-dependent
@@ -57,7 +66,7 @@ two `HARDWARE TODO`s.
 
 ```
 src/epaper_colorcal/
-  colorimetry.py     SPD → absolute Lab(D65) + sRGB(D65) + Lab(D50) via colour-science; reflectance-scale auto-detect
+  colorimetry.py     SPD (percent) → absolute Lab(D65) + sRGB(D65) + Lab(D50) via colour-science
   schemes.py         MONO/BWR/BWY/BWRY/BWGBRY: ink names in palette-index order (matches py-opendisplay's palettes)
   reader.py          CR30Reader: thin async wrapper over the vendored protocol (lazy serial import)
   synthetic.py       fake SPDs for --dry-run; IDEAL_SRGB per color name
@@ -125,9 +134,9 @@ If the handshake/measure fails, debug against `docs/cr30-protocol.md` (baud 1920
 frames, checksum quirk, chunk subcmds 0x10–0x13, SPD = `<31f` from first 124 bytes). Note the
 device-info payload slices are *guesses* — fix them from real frames.
 
-### Step 1 — pin down the reflectance SCALE (critical open question)
-`colorimetry.py::_reflectance_sd` auto-detects: divides by 100 if any value > 1.5, else treats
-as 0–1. **Verify this is right.** Measure the **white calibration tile** (≈ a known high
+### Step 1 — pin down the reflectance SCALE ✅ (percent, fixed in code)
+*Done 2026-11-19: the floats are percent; `_reflectance_sd` always divides by 100 (auto-detect
+removed — a deep black can read < 1.5 % in every band). Original instructions:* Measure the **white calibration tile** (≈ a known high
 reflectance) and a known mid-gray (e.g. a ColorChecker patch) and check the decoded sRGB/Lab is
 sane. If the floats turn out to be % (0–100) or some other scale, fix the normalization and the
 docstring. This single unknown most affects output correctness.
@@ -145,22 +154,40 @@ Display each solid color full-screen (send an image filled with the ink's nomina
 they should be in the same ballpark. The file stores white at L*=100 (the library normalises
 to the panel's white), so judge the other inks relative to it, not in absolute terms.
 
-### Step 3 — finish INTERACTIVE (BLE) mode — two HARDWARE TODOs in `interactive.py`
+### Step 3 — finish INTERACTIVE (BLE) mode ✅ (done 2026-11-19: real device size, single-ink check, refresh-complete wait)
 1. **Image size.** `OpenDisplayPanel.show_color` sends the ink's nominal colour
    (`#ff0000` for red, ...) with `dither_mode=NONE`; epaper-dithering 7 always maps a nominal
    colour to its own ink, whatever palette the device uses, so the measurement isn't circular
    (`test_solid_ink_images_select_their_ink_on_a_measured_palette` pins this). What's left is
    using the real `device.width/height` instead of the 800×480 placeholder.
-2. **Refresh settle time.** `upload_image` returns when data is sent, not when the e-paper has
-   physically settled (color refresh ~15–30 s, flashes mid-refresh). Tune `--settle` on a real
-   panel; consider reading twice and asserting low ΔE to confirm it's settled before recording.
+2. **Refresh settle time.** ✅ Resolved: `upload_image`/`upload_prepared_image` return only
+   after the device sends `DIRECT_WRITE_REFRESH_COMPLETE`, so `--settle` is a small margin
+   (default 3 s). Reads on the settled panel repeat to ≈ ΔE 0.1.
 
 Then validate end-to-end:
 ```bash
 uv run epaper-colorcal --scheme BWGBRY --id SPECTRA_7_3_6COLOR \
-  --interactive --address <BLE-addr> --port /dev/tty.usbserial-XXXX --temp 23 --settle 30
+  --interactive --address <BLE-addr> --port /dev/tty.usbserial-XXXX --temp 23
 ```
-Get the BLE address via `discover_devices`. If the device requires auth, pass `--key <hex>`.
+`--address` also accepts the advertised name (e.g. `OD216205`); find it via `discover_devices`. If the device requires auth, pass `--key <hex>`.
+
+### Step 3.5 (optional) — verify & implement the CR30's BLE transport
+The CR30's Bluetooth protocol was recovered from the official Android app
+(write-up not yet published) but never tested. This
+is what makes wireless (cable-free) measurement possible. Do it in order:
+
+1. **Enumerate.** With nRF Connect (phone) or `bleak` on the Mac, scan for the CR30 and confirm
+   a **`FFE0`** service with a write+notify **`FFE1`** characteristic (HM-10 signature).
+2. **Capture ground truth.** Enable Android *Developer Options → Bluetooth HCI snoop log*, run
+   the official app through black/white cal + one measurement, pull `btsnoop_hci.log`, open in
+   Wireshark. Line up the `FFE1` writes/notifications against the documented frames.
+3. **Reconcile the checksum.** The app uses `sum(all bytes incl. 0xFF marker) & 0xFF`; the
+   serial doc uses `(sum(0..57) & 0xFF) - 1`. Confirm which the device actually accepts.
+4. **Test the `bleak` prototype.** A `bleak` prototype client (not yet published)
+   already implements the spec (`wake` → 20-byte chunked write → notify reassembly → checksum →
+   `<31f` SPD decode). It's **unverified** — run it (`pip install bleak`), then compare its decoded
+   SPD **byte-for-byte** against the serial `CR30Reader`. Once validated, fold it into the package
+   as a BLE sibling of `CR30Reader` reusing the same frame parser.
 
 ### Step 4 (optional) — replace the vendored slice with our own
 Per `docs/cr30-protocol.md`'s reimplementation plan: write a typed `cr30/` against the spec,

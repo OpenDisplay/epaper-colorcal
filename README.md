@@ -100,7 +100,7 @@ uv run epaper-colorcal \
   --address <BLE-address> \
   --port /dev/tty.usbserial-1234 \
   --key <hex-key>        # only if the device requires auth
-  --settle 30            # seconds to wait for e-paper refresh before each read
+  --settle 3             # extra seconds after the panel reports refresh complete (default 3)
 ```
 
 Try it without any hardware:
@@ -109,12 +109,12 @@ Try it without any hardware:
 uv run epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
 ```
 
-> **Status: scaffold.** The orchestration and dry-run simulation work and are tested. Each ink
-> is shown as its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always maps to
-> that ink, so the measurement never goes through the palette being measured. One part is
-> marked `HARDWARE TODO` in `interactive.py` and must be validated on a real panel: the
-> **refresh settle time**. `upload_image` returns when data is sent, not when the e-paper has
-> physically settled, so `--settle` needs tuning against a real panel.
+> **Status: validated on hardware** (CR30 + Spectra 6 7.3", 2026-11-19). Each ink is shown as
+> its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always maps to that ink,
+> so the measurement never goes through the palette being measured; the tool checks the
+> screen is a single ink before uploading. The upload returns only after the panel reports
+> refresh complete, so `--settle` is just a small margin. `--address` takes a MAC, a macOS
+> UUID or the advertised name.
 
 When the CR30 arrives, follow [`docs/handoff-when-device-arrives.md`](docs/handoff-when-device-arrives.md)
 — a step-by-step checklist for validating the protocol, pinning the reflectance scale, finishing

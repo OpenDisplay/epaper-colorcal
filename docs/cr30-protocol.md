@@ -25,6 +25,35 @@ trusting.
 
 Every message in **both directions** is a 60-byte frame.
 
+### BLE transport (same command set, different pipe)
+
+The CR30 also exposes this protocol over **Bluetooth LE**, recovered from the official Android
+app (full write-up not yet published). Also **unverified against hardware.**
+
+|                 |                                                                     |
+|-----------------|---------------------------------------------------------------------|
+| Interface       | BLE, HM-10 / TI CC254x transparent serial bridge                    |
+| Service UUID    | **`FFE0`**                                                          |
+| Characteristic  | **`FFE1`** (write **and** notify)                                   |
+| Wake            | write a single `0x01` byte before each command                      |
+| Fragmentation   | frames sent in **20-byte chunks**, ~10 ms apart                     |
+| Flow            | `wake` → write frame → subscribe notifications → validate checksum   |
+
+The BLE payloads are the **same command frames** — the app's opcodes match the serial commands
+(`0x01` measure `measure()`, `0x10`/`0x11` black/white cal `calibrate()`). The app builds short,
+variable-length command frames as `[0xBB, opcode, ...params, 0xFF, checksum]` where
+**`checksum = sum(all preceding bytes) & 0xFF`** (note: no `-1`, and the `0xFF` marker is
+included in the sum — differs from the serial checksum below; reconcile on hardware).
+
+Notable differences the app reveals (full command reference in the write-up):
+- The spectrum is fetched via `getMeasureData` (opcode `0x02`, or `0x05` on newer firmware —
+  see `isNewAgreement`) as a **single 200-byte frame** with 31 LE float32 at byte offset 8,
+  rather than the 3-chunk `BB 01 0x10/0x11/0x12` serial read below.
+- Commands not in this serial spec: `0x1A` `syncDisplaySettings` (light source / angle / mode /
+  color space / ΔE formula / second illuminant), `0x1B` `syncToleranceSettings` (write target
+  L*a*b*), `0x1E` `getCalibrationState`, `0x12` `getDeviceInfo`, `0x14` `syncTime`, `0x21`
+  `syncDisplayWhiteness`, and the `0x16` target-storage family.
+
 ## Frame layout
 
 ```
@@ -90,6 +119,14 @@ inside the cap. Working assumption: black calibration reads the sensor with the 
 light source off (sealed, dark baseline); white calibration fires the light source and reads
 its reflection off the cap's internal white patch. No separate black tile needed.
 
+The device also calibrates itself, and its stored calibration is good enough without any
+explicit `BB 10`/`BB 11` from the host: on a second unit (2026-11-19) uncalibrated reads of
+the closed cap matched the device's own screen to ΔE ≈ 0.05, and measuring the cap returns
+bit-identical (stored reference) spectra every time. The stock app tracks calibration
+validity windows — **white ~24 h** (`WHITE_CALIBRATE_INTERVAL = 864e5` ms), **black ~7 days**
+(`BLACK_CALIBRATE_INTERVAL = 6048e5` ms); `getCalibrationState` (BLE `0x1E`) returns both
+states + timestamps.
+
 ```
 black:  send  BB 10 00 00 ,  read response
 white:  send  BB 11 00 00 ,  read response
@@ -140,8 +177,8 @@ spd = struct.unpack("<31f", accumulated[:124])
 
 ## Open questions (resolve with real hardware)
 
-- **Reflectance scale of the floats** — fraction `0..1` or percentage `0..100`?
-  (`colorimetry.py` currently auto-detects: divides by 100 if any value > 1.5.)
+- ~~**Reflectance scale of the floats**~~ — **resolved 2026-11-19: percentage `0..100`**
+  (white cap reads 71–79 %; Lab matches the device's screen to ΔE ≈ 0.05).
 - **Bytes 56–57** and the `0xBB` **marker** `0x00` vs `0xFF` semantics.
 - Whether handshake steps **2–4** are actually required to enable measurement.
 - Meaning of the `param` byte (always `0x00` in observed traffic).
