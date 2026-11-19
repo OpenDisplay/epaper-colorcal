@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.5.0...v0.6.0) (2026-11-19)
+
+
+### Features
+
+* use instruments ArgyllCMS supports, such as the X-Rite i1Pro ([ad5b6a0](https://github.com/OpenDisplay/epaper-colorcal/commit/ad5b6a0a74dd02631c94f5c03a233776a1c55ed5))
+
 ## [0.5.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.4.0...v0.5.0) (2026-11-19)
 
 
