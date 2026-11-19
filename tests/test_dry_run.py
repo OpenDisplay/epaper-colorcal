@@ -12,9 +12,16 @@ from epaper_dithering import Palette
 
 from epaper_colorcal.colorimetry import average_spds, reading_from_spd
 from epaper_colorcal.emit import MeasuredColor, render_palette, spectra_sidecar
-from epaper_colorcal.measure_palette import _dry_run_provider, build_colors, main, measure_color
+from epaper_colorcal.measure_palette import build_colors, main, measure_color
 from epaper_colorcal.schemes import Scheme, get_scheme
 from epaper_colorcal.synthetic import IDEAL_SRGB, synthetic_spd
+
+
+def _dry_run_provider(count: int):
+    def provide(name: str) -> list[list[float]]:
+        return [synthetic_spd(IDEAL_SRGB.get(name, (128, 128, 128)), jitter=0.01, seed=i) for i in range(count)]
+
+    return provide
 
 
 def test_cr30_package_imports_without_transport_libraries() -> None:

@@ -21,16 +21,6 @@ from epaper_dithering import Palette, PaletteEntry
 from .colorimetry import CR30_WAVELENGTHS, ColorReading
 from .schemes import Scheme
 
-# The colour that requests each ink: what a caller draws to get that ink solid.
-NOMINALS: dict[str, str] = {
-    "black": "#000000",
-    "white": "#ffffff",
-    "yellow": "#ffff00",
-    "red": "#ff0000",
-    "blue": "#0000ff",
-    "green": "#00ff00",
-}
-
 
 @dataclass(frozen=True)
 class MeasuredColor:
@@ -71,12 +61,20 @@ def build_palette(
     if [c.name for c in colors] != list(scheme.colors):
         raise ValueError(f"scheme {scheme.name} needs colors {list(scheme.colors)}, got {[c.name for c in colors]}")
 
-    entries = [PaletteEntry(c.reading.lab_d65, c.name, NOMINALS[c.name]) for c in colors]
+    entries = [PaletteEntry(c.reading.lab_d65, c.name, scheme.ink(c.name).nominal) for c in colors]
     on = (measured_on or date.today()).isoformat()
     source = f"CHNSpec CR30 s/n {serial}, measured {on}, D65/2°, {_temp_phrase(temperature_c)}"
     if note:
         source = f"{note}; {source}"
-    return Palette.from_absolute_lab(entries, scheme.colors.index("white"), measured=True).with_source(source)
+    return Palette.from_absolute_lab(entries, paper_white_index(colors), measured=True).with_source(source)
+
+
+def paper_white_index(colors: list[MeasuredColor]) -> int:
+    """The ink named ``white``, or else the lightest one measured (as py-opendisplay's ``mode_palette``)."""
+    names = [c.name for c in colors]
+    if "white" in names:
+        return names.index("white")
+    return max(range(len(colors)), key=lambda i: colors[i].reading.lab_d65[0])
 
 
 def render_palette(
@@ -114,6 +112,7 @@ def spectra_sidecar(
         "id": palette_id,
         "scheme": scheme.name,
         "firmware_id": scheme.firmware_id,
+        "inks": [{"name": ink.name, "nominal": ink.nominal} for ink in scheme.inks],
         "instrument": "CHNSpec CR30",
         "serial": serial,
         "measured_on": (measured_on or date.today()).isoformat(),

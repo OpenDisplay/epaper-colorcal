@@ -1,21 +1,24 @@
 # epaper-colorcal
 
 Measure the real colours of an e-paper panel with a **CHNSpec CR30** colorimeter and turn them
-into a palette file for OpenDisplay's [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering).
+into a palette file for [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering), or
+into plain colour values for any other project.
 
 [![License](https://img.shields.io/github/license/OpenDisplay/epaper-colorcal?style=flat-square)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
 
-Seat the CR30 on the panel once; the tool shows each ink on the panel over Bluetooth, reads its
-spectral reflectance, and prints an `epaper-palette` file. With the CR30 on Bluetooth too, the
-whole measurement is wireless.
+Seat the CR30 on the panel once; the tool shows each ink, reads its spectral reflectance, and
+prints an `epaper-palette` file. It works with any panel: an OpenDisplay board is driven over
+Bluetooth automatically, anything else through a command you give or by hand.
 
 ```bash
 uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal \
-  --scheme BWGBRY --id spectra6_7in3 \
-  --interactive --address OD216205 --cr30-ble > spectra6_7in3.json
+  --id spectra6_7in3 --address OD216205 --cr30-ble > spectra6_7in3.json
 ```
+
+With an OpenDisplay board and the CR30 both on Bluetooth, that's the whole measurement: no
+cable, no buttons; the board reports its inks and temperature.
 
 ## Why
 
@@ -32,9 +35,9 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
 ## What you need
 
 - A **CHNSpec CR30**, connected over **USB** or **Bluetooth**.
-- For automatic measurement: the panel on an **OpenDisplay board** reachable over Bluetooth.
-  Without one you can show each ink yourself (manual mode).
-- Python 3.11+ (3.13+ for automatic mode, which needs `py-opendisplay`).
+- A way to fill the panel with one colour: an **OpenDisplay board** (automatic), **any command**
+  that does it (`--show-command`), or you, by hand.
+- Python 3.11+ (3.13+ to drive OpenDisplay boards, which needs `py-opendisplay`).
 
 ## Install
 
@@ -58,7 +61,7 @@ The extras:
 |---|---|---|
 | `serial` | `pyserial-asyncio` | the CR30 over USB (`--port`) |
 | `ble` | `bleak` | the CR30 over Bluetooth (`--cr30-ble`) |
-| `opendisplay` | `py-opendisplay` | automatic mode (`--interactive`) |
+| `opendisplay` | `py-opendisplay` | driving an OpenDisplay board (`--address`) |
 
 `--dry-run` and the tests need none of them.
 
@@ -86,50 +89,72 @@ closed for both steps.
 ## Measuring a panel
 
 **Record the panel's temperature.** E-paper colours shift with temperature, so a palette is
-only valid near the temperature it was measured at. Pass it with `--temp`; in automatic mode,
-without `--temp`, the tool uses the temperature the OpenDisplay board advertises (its chip
-sensor, read before connecting, which is close to room temperature on an idle board).
+only valid near the temperature it was measured at. Pass it with `--temp`. With an OpenDisplay
+board, the tool otherwise uses the temperature the board advertises (its chip sensor, read
+before connecting, which is close to room temperature on an idle board).
 
-### Automatic (recommended)
+Seat the CR30 flat on the panel, away from the edges. The tool shows each ink, takes `--count`
+reads (default 3) and averages them. How each ink gets onto the panel is up to you:
 
-Seat the CR30 flat on the panel, away from the edges, and run:
+### With an OpenDisplay board (automatic)
 
 ```bash
-uv run epaper-colorcal --scheme BWGBRY --id spectra6_7in3 \
-  --note "Spectra 6 7.3in" \
-  --interactive --address OD216205 \
-  --cr30-ble \
+uv run epaper-colorcal --id spectra6_7in3 --note "Spectra 6 7.3in" \
+  --address OD216205 --cr30-ble \
   --out spectra/spectra6_7in3.json > spectra6_7in3.json
 ```
 
-For each ink the tool fills the screen with it, waits for the refresh to finish, takes `--count`
-reads (default 3) and averages them. A six-colour Spectra panel takes about 9 minutes, mostly
-panel refreshes. The CR30 stays put, so every ink is measured at the same spot.
+The board reports its inks, so `--scheme` isn't needed (pass it and the tool checks it matches).
+For each ink the tool fills the screen, waits for the refresh to finish, and reads. A six-colour
+Spectra panel takes about 9 minutes, mostly panel refreshes; the CR30 stays put, so every ink
+is measured at the same spot.
 
-- `--address` is the OpenDisplay board's name (e.g. `OD216205`), MAC or macOS UUID.
-- `--key <hex>` if the board is encrypted.
-- Use `--port <port>` instead of `--cr30-ble` for a USB-connected CR30.
+- `--address` is the board's name (e.g. `OD216205`), MAC or macOS UUID; `--key <hex>` if it's
+  encrypted.
+- Each ink is sent as its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always
+  maps to that ink, so the measurement never depends on the palette the board already uses. The
+  tool checks the screen really is one ink before uploading.
 
-Each ink is sent as its nominal colour (`#ff0000` for red, …), which `epaper-dithering` always
-maps to that ink, so the measurement never depends on whatever palette the board already uses.
-The tool checks the screen really is one ink before uploading.
+### With a command (any panel you can script)
 
-### Manual
+`--show-command` runs a command for each ink, which should fill the panel with it and return
+once it's shown. Its fields are `{name}`, `{hex}` (e.g. `ff0000`), `{r}` `{g}` `{b}` and
+`{index}`:
 
-Without an OpenDisplay board, show each ink yourself: fill the screen with the ink's nominal
-colour and send it **undithered**. Then:
+```bash
+uv run epaper-colorcal --scheme SEVEN_COLOR --id photoframe --temp 21 --port /dev/ttyUSB0 \
+  --show-command 'curl -fsS "http://photoframe.local/fill?color={hex}"' --settle 30 > photoframe.json
+```
+
+Use `--settle` for the panel's refresh time if the command returns before the panel has
+finished. This is also the way to measure OpenEPaperLink tags today: a short script that pushes
+a solid image to the tag through its access point.
+
+### By hand
+
+Without any of that, show each ink yourself: fill the screen with the ink's nominal colour,
+**undithered**. The tool asks for each ink in turn; show it, seat the CR30, press Enter.
 
 ```bash
 uv run epaper-colorcal --scheme BWRY --id my_panel --temp 21 --port /dev/ttyUSB0 > my_panel.json
 ```
 
-The tool asks for each ink in order. Show it, seat the CR30, press Enter.
+### Which inks
+
+| | |
+|---|---|
+| `--scheme` | a preset: `MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY`, `SEVEN_COLOR` (7-colour ACeP), `GRAY4`, `GRAY16` |
+| `--inks` | any list, in the panel's index order: `--inks black,white,red,orange=#ff8000` (black, white, red, yellow, blue, green and orange need no colour) |
+| neither | the display's own (OpenDisplay boards report theirs) |
+
+The ink called `white` is the paper white the palette is normalised to; without one, the
+lightest measured ink is.
 
 ### Try it without hardware
 
 ```bash
 uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --dry-run
-uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
+uvx epaper-colorcal --inks black,white,orange=#ff8000 --id TEST --temp 23 --dry-run
 ```
 
 ## Output
@@ -168,16 +193,18 @@ Use it with:
 
 | Option | |
 |---|---|
-| `--scheme` | `MONO`, `BWR`, `BWY`, `BWRY` or `BWGBRY`; inks are measured in the firmware's index order |
+| `--scheme` / `--inks` | the inks to measure, in index order (see [Which inks](#which-inks)) |
 | `--id` | a name for the measurement (stored in the sidecar) |
-| `--temp` | panel temperature in °C (automatic mode: defaults to the board's advertised temperature) |
+| `--temp` | panel temperature in °C (default: what the display reports, e.g. an OpenDisplay board) |
 | `--note` | free text put at the start of the palette's `source`, e.g. the panel model |
 | `--count` | reads averaged per ink (default 3) |
 | `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
 | `--calibrate` | explicit black/white calibration first (USB) |
-| `--interactive`, `--address`, `--key`, `--settle` | automatic mode via an OpenDisplay board |
+| `--address`, `--key` | show the inks on an OpenDisplay board |
+| `--show-command` | show the inks by running a command |
+| `--settle` | seconds to wait after an ink is shown, before reading (default 3) |
 | `--out` | raw-spectra sidecar path |
-| `--dry-run` | synthetic spectra, no hardware |
+| `--dry-run` | synthetic spectra and a simulated panel, no hardware |
 
 ## How it works
 
@@ -187,8 +214,15 @@ CR30 (USB or BLE) ─► 31-band reflectance, % ─► colour-science: XYZ & Lab
                        epaper_dithering.Palette.from_absolute_lab ◄┘ ─► epaper-palette JSON
 ```
 
-`epaper_colorcal.cr30` is a small, typed client for the CR30 over both transports; see
-[`docs/cr30-protocol.md`](docs/cr30-protocol.md) for the protocol. Colour maths is done here
+The measurement loop (`measure.py`) connects two kinds of adapter:
+
+- **instruments** (`epaper_colorcal.cr30`): the CR30 over USB or Bluetooth, behind one
+  interface; see [`docs/cr30-protocol.md`](docs/cr30-protocol.md) for the protocol;
+- **displays** (`epaper_colorcal.displays`): OpenDisplay, command, manual and simulated. A
+  display shows one ink at a time and may also report the panel's inks and temperature.
+
+Supporting another panel or project means adding a display adapter (or, until then, a
+`--show-command` script). Colour maths is done here
 with [`colour-science`](https://www.colour-science.org/), not by the device.
 
 ## Temperature
