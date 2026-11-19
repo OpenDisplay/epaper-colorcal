@@ -131,7 +131,7 @@ class OpenDisplayPanel:
             raise RuntimeError("connect() must be called before show_color()")
 
         from epaper_dithering import DitherMode  # provided transitively by py-opendisplay
-        from opendisplay import prepare_image
+        from opendisplay import prepare_image  # pylint: disable=import-error  # extra; connect() checked it
 
         device = self._device
         image = self._solid_ink_image(index, (device.width, device.height))
