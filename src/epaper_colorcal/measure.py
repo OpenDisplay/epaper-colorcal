@@ -42,31 +42,47 @@ def measure_spectra(name: str, spectra: list[Spectrum]) -> MeasuredColor:
     )
 
 
-# Settling: the panel counts as settled once this many reads, this far apart, agree within this
-# colour difference (ΔE76, D65 Lab). The CR30's own noise is about ΔE 0.1; a refreshing panel
-# changes by far more than 1 between reads a second apart.
-SETTLE_READS = 4
+# Settling, sized from a recorded refresh of a Hanshow 2.00" BWY (yellow, full refresh): after
+# the tag reported the transfer complete it kept showing the old colour, perfectly steady, for
+# about 6 s, flashed for 11 s, then held black steady for about 9 s before yellow built up
+# (about 40 s in all). So the colour must first move away from what the panel showed before
+# (the refresh has started), and then hold steady for longer than such a pause.
+SETTLE_CHANGE = 3.0  # ΔE76 away from the previous colour that counts as "the refresh started"
+SETTLE_TOLERANCE = 1.0  # ΔE76 within which reads count as steady (the CR30's noise is about 0.1)
+SETTLE_STABLE = 15.0  # seconds the colour must hold steady
+SETTLE_MIN_READS = 4
 SETTLE_INTERVAL = 1.0
-SETTLE_TOLERANCE = 1.0
-SETTLE_TIMEOUT = 180.0
+SETTLE_TIMEOUT = 240.0
 
 
-async def wait_until_settled(instrument: Instrument) -> int:
-    """Read until the last :data:`SETTLE_READS` reads agree; return how many reads it took.
+async def wait_until_settled(instrument: Instrument, before: tuple[float, float, float] | None = None) -> float:
+    """Read until the panel has refreshed and holds its colour; return the seconds it took.
 
-    Raises TimeoutError if the panel hasn't settled within :data:`SETTLE_TIMEOUT` seconds.
+    ``before`` is the colour (D65 Lab) the panel showed before the new ink was sent; until the
+    colour moves away from it, the refresh hasn't started. Then the reads of the last
+    :data:`SETTLE_STABLE` seconds (at least :data:`SETTLE_MIN_READS`) must agree within
+    :data:`SETTLE_TOLERANCE`. Raises TimeoutError after :data:`SETTLE_TIMEOUT` seconds.
     """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + SETTLE_TIMEOUT
-    window: list[tuple[float, float, float]] = []
-    reads = 0
+    start = loop.time()
+    started = before is None
+    window: list[tuple[float, tuple[float, float, float]]] = []
     while True:
-        window = [*window, reading_from_spectrum(await instrument.measure()).lab_d65][-SETTLE_READS:]
-        reads += 1
-        if len(window) == SETTLE_READS and max(math.dist(a, b) for a in window for b in window) <= SETTLE_TOLERANCE:
-            return reads
-        if loop.time() > deadline:
-            raise TimeoutError(f"the panel did not settle within {SETTLE_TIMEOUT:g} s")
+        now, lab = loop.time(), reading_from_spectrum(await instrument.measure()).lab_d65
+        if not started:
+            started = before is not None and math.dist(lab, before) > SETTLE_CHANGE
+        elif window and max(math.dist(lab, other) for _, other in window) > SETTLE_TOLERANCE:
+            window = []  # still changing: start the steady window again from this read
+        if started:
+            window.append((now, lab))
+            if len(window) >= SETTLE_MIN_READS and now - window[0][0] >= SETTLE_STABLE:
+                return now - start
+        if now - start > SETTLE_TIMEOUT:
+            reason = "kept changing" if started else "never changed from the previous colour"
+            raise TimeoutError(
+                f"The panel did not settle within {SETTLE_TIMEOUT:g} s: its colour {reason}. "
+                "Is the CR30 seated flat and still, and did the panel refresh?"
+            )
         await asyncio.sleep(SETTLE_INTERVAL)
 
 
@@ -78,10 +94,11 @@ async def measure_all(scheme: Scheme, display: Display, instrument: Instrument, 
     """
     colors = []
     for index, ink in enumerate(scheme.inks):
+        before = None if display.settled_after_show else reading_from_spectrum(await instrument.measure()).lab_d65
         await display.show(index, ink)
-        if not display.settled_after_show:
-            print(f"  {ink.name}: waiting for the panel to settle…", file=sys.stderr)
-            reads = await wait_until_settled(instrument)
-            print(f"  {ink.name}: settled after {reads} reads", file=sys.stderr)
+        if before is not None:
+            print(f"  {ink.name}: waiting for the panel to refresh and settle…", file=sys.stderr)
+            seconds = await wait_until_settled(instrument, before)
+            print(f"  {ink.name}: settled after {seconds:.0f} s", file=sys.stderr)
         colors.append(measure_spectra(ink.name, [await instrument.measure() for _ in range(count)]))
     return colors

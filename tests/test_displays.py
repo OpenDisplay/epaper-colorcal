@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from epaper_colorcal.colorimetry import reading_from_spectrum
 from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
 from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
 from epaper_colorcal.instruments import Instrument, SyntheticInstrument
@@ -308,6 +309,7 @@ class _FakeOEPL:
         self.uploads: list[tuple[object, dict]] = []
         self.saved: list[dict] = []
         self.disconnects = 0
+        self.stored = None  # the image the AP has for the tag
 
     async def connect(self) -> None:
         self.connected = True
@@ -327,7 +329,11 @@ class _FakeOEPL:
 
     async def get_tag_type(self, hw_type: int):
         table = {"white": [255, 255, 255], "black": [0, 0, 0], "red": [255, 0, 0], "yellow": [255, 255, 0]}
-        return type("TagType", (), {"name": 'M3 3.0" BWRY', "width": 400, "height": 168, "color_table": table})()
+        fields = {"name": 'M3 3.0" BWRY', "width": 400, "height": 168, "color_table": table, "display_colors": table}
+        return type("TagType", (), fields)()
+
+    async def get_image(self, mac: str):
+        return self.stored
 
     def tag(self, mac: str):
         client = self
@@ -413,35 +419,55 @@ def test_cli_oepl_needs_both_flags(capsys) -> None:
 
 
 class _Refreshing(Instrument):
-    """Reads a panel that flashes for a few reads, then holds a colour (plus tiny noise)."""
+    """A panel refreshing like the recorded Hanshow BWY: the old colour stays steady for a while,
+    then it flashes, pauses on black, and settles on the new colour. One phase step per read."""
 
-    def __init__(self, flashing_reads: int) -> None:
-        self.flashing = flashing_reads
+    OLD, FLASH_LIGHT, FLASH_DARK, BLACK, NEW = 60.0, 90.0, 20.0, 4.0, 30.0
+
+    def __init__(self, *, old_reads: int = 15, flashes: int = 4, black_reads: int = 5) -> None:
+        flash = [self.FLASH_LIGHT, self.FLASH_DARK] * (flashes // 2)
+        self.script = [self.OLD] * old_reads + flash + [self.BLACK] * black_reads
         self.reads = 0
 
+    def level(self, read: int) -> float:
+        return self.script[read] if read < len(self.script) else self.NEW + 0.01 * (read % 3)
+
     async def measure(self) -> Spectrum:
+        level = self.level(self.reads)
         self.reads += 1
-        if self.reads <= self.flashing:
-            level = 90.0 if self.reads % 2 else 4.0  # white/black flashes mid-refresh
-        else:
-            level = 30.0 + 0.01 * (self.reads % 3)
         return Spectrum.cr30([level] * 31)
+
+    def lab(self, level: float) -> tuple[float, float, float]:
+        return reading_from_spectrum(Spectrum.cr30([level] * 31)).lab_d65
 
 
 @pytest.fixture
 def fast_settle(monkeypatch):
-    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_INTERVAL", 0)
+    # The real timing scaled down: reads 0.02 s apart, a 0.2 s steady window (vs 1 s and 15 s).
+    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_INTERVAL", 0.02)
+    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_STABLE", 0.2)
 
 
-async def test_settling_waits_out_a_refresh(fast_settle) -> None:
-    instrument = _Refreshing(flashing_reads=5)
-    assert await wait_until_settled(instrument) == 5 + 4  # four stable reads after the flashes
+async def _settled_level(panel: _Refreshing) -> float:
+    await wait_until_settled(panel, before=panel.lab(panel.OLD))
+    return panel.level(panel.reads - 1)
 
 
-async def test_settling_gives_up_on_a_panel_that_never_settles(fast_settle, monkeypatch) -> None:
-    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_TIMEOUT", 0)
-    with pytest.raises(TimeoutError, match="did not settle"):
-        await wait_until_settled(_Refreshing(flashing_reads=10**6))
+async def test_settling_ignores_the_old_colour_holding_steady_before_the_refresh(fast_settle) -> None:
+    panel = _Refreshing(old_reads=20)  # steady old colour for longer than the steady window
+    assert await _settled_level(panel) == pytest.approx(panel.NEW, abs=0.05)
+
+
+async def test_settling_outlasts_a_pause_mid_refresh(fast_settle) -> None:
+    panel = _Refreshing(black_reads=5)  # ~0.1 s on black, shorter than the 0.2 s window
+    assert await _settled_level(panel) == pytest.approx(panel.NEW, abs=0.05)
+
+
+async def test_settling_gives_up_on_a_panel_that_never_refreshes(fast_settle, monkeypatch) -> None:
+    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_TIMEOUT", 0.1)
+    panel = _Refreshing(old_reads=10**6)
+    with pytest.raises(TimeoutError, match="never changed from the previous colour"):
+        await wait_until_settled(panel, before=panel.lab(panel.OLD))
 
 
 class _Unsettled(SimDisplay):
@@ -449,7 +475,93 @@ class _Unsettled(SimDisplay):
 
 
 async def test_the_loop_waits_for_a_display_that_does_not_settle_itself(fast_settle, capsys) -> None:
-    instrument = _Refreshing(flashing_reads=3)
-    colors = await measure_all(get_scheme("MONO"), _Unsettled(), instrument, count=2)
-    assert all(c.spds[0][0] < 31 for c in colors)  # no flash read was counted
+    class _PerInk(_Refreshing):
+        # each ink starts a new refresh: the "old" colour is whatever was shown before
+        def __init__(self) -> None:
+            super().__init__(old_reads=3)
+
+        async def measure(self) -> Spectrum:
+            if self.reads >= len(self.script) + 30:  # this ink is done; the next one refreshes
+                self.reads = 0
+            return await super().measure()
+
+    colors = await measure_all(get_scheme("MONO"), _Unsettled(), _PerInk(), count=2)
+    assert all(c.spds[0][0] == pytest.approx(_Refreshing.NEW, abs=0.05) for c in colors)
     assert "settled after" in capsys.readouterr().err
+
+
+# ── failing mid-run ─────────────────────────────────────────────────────────
+
+
+class _DropsOut(Instrument):
+    """An instrument that answers once, then goes silent (e.g. a CR30 that switched itself off)."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+        self.closed = False
+
+    async def measure(self) -> Spectrum:
+        self.reads += 1
+        if self.reads > 1:
+            raise TimeoutError("The CR30 did not answer (command 0x02) over Bluetooth. Is the CR30 switched on?")
+        return Spectrum.cr30([50.0] * 31)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _ClosingSim(SimDisplay):
+    closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_a_timeout_mid_run_is_one_line_and_still_cleans_up(monkeypatch, capsys) -> None:
+    display, instrument = _ClosingSim(), _DropsOut()
+    monkeypatch.setattr("epaper_colorcal.measure_palette._display", lambda args: display)
+    monkeypatch.setattr("epaper_colorcal.measure_palette._instrument", lambda args, d: instrument)
+
+    assert main(["--scheme", "MONO", "--id", "S", "--temp", "20", "--dry-run"]) == 1
+
+    err = capsys.readouterr().err
+    assert "error: The CR30 did not answer" in err and "Traceback" not in err
+    assert display.closed and instrument.closed  # e.g. an OEPL tag gets its settings back
+
+
+async def test_oepl_tag_that_never_finishes_is_explained(fake_oepl) -> None:
+    from oepl import OEPLTimeoutError
+
+    clients = fake_oepl()
+    display = OEPLDisplay("ap.local", "AA", wait_timeout=7)
+    await display.connect()
+
+    async def times_out(image, **kwargs):
+        raise OEPLTimeoutError("Timed out after 7s")
+
+    clients[-1].tag = lambda mac: type("H", (), {"upload_image": staticmethod(times_out)})()
+    with pytest.raises(TimeoutError, match="did not finish showing red within 7 s.*Home Assistant"):
+        await display.show(2, Ink("red", "#ff0000"))
+
+
+async def test_oepl_shows_another_colour_first_when_the_tag_already_shows_this_one(fake_oepl) -> None:
+    from PIL import Image
+
+    clients = fake_oepl()
+    display = OEPLDisplay("ap.local", "AA")
+    await display.connect()
+    clients[-1].stored = Image.new("RGB", (400, 168), (255, 255, 0))  # already solid yellow
+    await display.show(3, Ink("yellow", "#ffff00"))
+    shown = [image.getpixel((0, 0)) for image, _ in clients[-1].uploads]
+    assert shown == [(255, 255, 255), (255, 255, 0)]  # white first, so yellow is a new image
+
+
+def test_a_stopped_run_reports_and_exits_130(monkeypatch, capsys) -> None:
+    import asyncio
+
+    async def stopped(args, requested):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("epaper_colorcal.measure_palette._measure", stopped)
+    assert main(["--scheme", "MONO", "--id", "S", "--temp", "20", "--dry-run"]) == 130
+    assert "Stopped" in capsys.readouterr().err

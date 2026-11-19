@@ -213,6 +213,48 @@ async def test_usb_cr30_names_the_port_when_the_device_is_silent(monkeypatch) ->
         await UsbCR30("/dev/ttyUSB9", streams=(fake, fake)).connect()
 
 
+async def test_ble_cr30_retries_a_command_dropped_mid_run(monkeypatch) -> None:
+    # Seen on hardware: after a minute without traffic, the first command got no answer.
+    monkeypatch.setattr("epaper_colorcal.cr30.device.BLE_SETTLE", 0)
+    monkeypatch.setattr("epaper_colorcal.cr30.device.BLE_CHUNK_DELAY", 0)
+    monkeypatch.setattr("epaper_colorcal.cr30.device.TIMEOUT", 0.05)
+    monkeypatch.setattr("epaper_colorcal.cr30.device.MEASURE_TIMEOUT", 0.05)
+    fake = _FakeBleak()
+    cr30 = BleCR30(client=fake)
+    await cr30.connect()
+    real_write = fake.write_gatt_char
+    dropped: list[bytes] = []
+
+    async def drop_next_trigger(char: str, data: bytes, response: bool = False) -> None:
+        if data != b"\x01" and data[1] == f.CMD_MEASURE and not dropped:
+            dropped.append(data)
+            return
+        await real_write(char, data, response)
+
+    fake.write_gatt_char = drop_next_trigger  # type: ignore[method-assign]
+    spd = await cr30.measure()
+    assert dropped and len(spd.values) == 31
+
+
+async def test_ble_cr30_gives_up_after_the_retry(monkeypatch) -> None:
+    monkeypatch.setattr("epaper_colorcal.cr30.device.BLE_SETTLE", 0)
+    monkeypatch.setattr("epaper_colorcal.cr30.device.TIMEOUT", 0.05)
+    fake = _FakeBleak()
+    fake.replies = {}
+    attempts = 0
+    real_write = fake.write_gatt_char
+
+    async def count(char: str, data: bytes, response: bool = False) -> None:
+        nonlocal attempts
+        attempts += data == b"\x01"
+        await real_write(char, data, response)
+
+    fake.write_gatt_char = count  # type: ignore[method-assign]
+    with pytest.raises(TimeoutError, match="did not answer"):
+        await BleCR30(client=fake).connect()
+    assert attempts == 2  # one wake per attempt
+
+
 def test_open_cr30_picks_the_transport() -> None:
     assert isinstance(open_cr30(port="/dev/ttyUSB0"), UsbCR30)
     assert isinstance(open_cr30(ble="auto"), BleCR30)
