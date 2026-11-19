@@ -12,7 +12,8 @@ spectral reflectance, and prints an `epaper-palette` file. With the CR30 on Blue
 whole measurement is wireless.
 
 ```bash
-epaper-colorcal --scheme BWGBRY --id spectra6_7in3 --temp 21 \
+uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal \
+  --scheme BWGBRY --id spectra6_7in3 \
   --interactive --address OD216205 --cr30-ble > spectra6_7in3.json
 ```
 
@@ -37,12 +38,21 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
 
 ## Install
 
+Nothing to install with [uv](https://docs.astral.sh/uv/): `uvx` runs the tool from PyPI in a
+throwaway environment. Name the extras you need (below):
+
 ```bash
-git clone https://github.com/OpenDisplay/epaper-colorcal && cd epaper-colorcal
-uv sync --all-extras
+# Automatic mode, everything over Bluetooth (py-opendisplay needs Python 3.13+)
+uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal --help
+
+# Manual mode, CR30 on USB
+uvx --from 'epaper-colorcal[serial]' epaper-colorcal --help
 ```
 
-Or pick only what you use:
+To install it instead: `uv tool install --python 3.13 'epaper-colorcal[ble,opendisplay]'` (or `pip install`),
+then run `epaper-colorcal`. For development, clone the repo and `uv sync --all-extras`.
+
+The extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
@@ -51,6 +61,9 @@ Or pick only what you use:
 | `opendisplay` | `py-opendisplay` | automatic mode (`--interactive`) |
 
 `--dry-run` and the tests need none of them.
+
+The commands below use `uv run epaper-colorcal` (from a clone); with `uvx` or an installed
+tool, put `uvx --from '…' epaper-colorcal` or `epaper-colorcal` in its place.
 
 ## Connecting the CR30
 
@@ -72,8 +85,10 @@ closed for both steps.
 
 ## Measuring a panel
 
-**Note the panel's temperature** and pass it with `--temp`. E-paper colours shift with
-temperature, so a palette is only valid near the temperature it was measured at.
+**Record the panel's temperature.** E-paper colours shift with temperature, so a palette is
+only valid near the temperature it was measured at. Pass it with `--temp`; in automatic mode,
+without `--temp`, the tool uses the temperature the OpenDisplay board advertises (its chip
+sensor, read before connecting, which is close to room temperature on an idle board).
 
 ### Automatic (recommended)
 
@@ -81,7 +96,7 @@ Seat the CR30 flat on the panel, away from the edges, and run:
 
 ```bash
 uv run epaper-colorcal --scheme BWGBRY --id spectra6_7in3 \
-  --note "Spectra 6 7.3in" --temp 21 \
+  --note "Spectra 6 7.3in" \
   --interactive --address OD216205 \
   --cr30-ble \
   --out spectra/spectra6_7in3.json > spectra6_7in3.json
@@ -113,8 +128,8 @@ The tool asks for each ink in order. Show it, seat the CR30, press Enter.
 ### Try it without hardware
 
 ```bash
-uv run epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --dry-run
-uv run epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
+uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --dry-run
+uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --interactive --dry-run
 ```
 
 ## Output
@@ -155,7 +170,7 @@ Use it with:
 |---|---|
 | `--scheme` | `MONO`, `BWR`, `BWY`, `BWRY` or `BWGBRY`; inks are measured in the firmware's index order |
 | `--id` | a name for the measurement (stored in the sidecar) |
-| `--temp` | panel temperature in °C |
+| `--temp` | panel temperature in °C (automatic mode: defaults to the board's advertised temperature) |
 | `--note` | free text put at the start of the palette's `source`, e.g. the panel model |
 | `--count` | reads averaged per ink (default 3) |
 | `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
@@ -178,7 +193,7 @@ with [`colour-science`](https://www.colour-science.org/), not by the device.
 
 ## Temperature
 
-The tool records the temperature; it doesn't compensate for it. Measuring a panel at a few
+The tool records the temperature (from `--temp` or the board); it doesn't compensate for it. Measuring a panel at a few
 temperatures and interpolating is the planned next step, and the sidecars are structured for it.
 See [`docs/temperature-compensation.md`](docs/temperature-compensation.md).
 
