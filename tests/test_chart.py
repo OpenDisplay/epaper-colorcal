@@ -11,6 +11,7 @@ from epaper_colorcal.chart import Progress, load_chart, main, read_patches, ti3
 from epaper_colorcal.spectrum import Spectrum
 
 TI2 = Path(__file__).parent / "fixtures" / "small_rgb.ti2"
+PRINTTARG = Path(__file__).parent / "fixtures" / "argyll_printtarg_rgb.ti2"  # made by targen + printtarg
 
 
 def test_cgats_reads_an_argyll_ti2() -> None:
@@ -114,3 +115,24 @@ def test_cli_dry_run_writes_a_ti3(tmp_path, capsys) -> None:
     assert main([str(TI2), "--dry-run", "--out", str(out)]) == 0
     assert len(cgats.read(out).rows) == 4
     assert "colprof" in capsys.readouterr().err
+
+
+def test_a_real_printtarg_chart_loads() -> None:
+    chart = load_chart(PRINTTARG)
+    assert chart.color_rep == "RGB" and len(chart.patches) == 105
+    assert chart.patches[0].sample_id == "1" and chart.patches[0].location == "A10"
+
+
+def test_patches_are_read_in_paper_order_not_sample_order() -> None:
+    order = [p.location for p in load_chart(PRINTTARG).reading_order]
+    assert order[:3] == ["A1", "A2", "A3"]
+    strips = [loc.rstrip("0123456789") for loc in order]
+    assert strips == sorted(strips, key=lambda s: (len(s), s))  # strip by strip
+    assert order.index("A10") < order.index("B1")  # A10 is in strip A, before B1
+
+
+def test_cli_dry_run_on_a_real_chart_keeps_sample_order_in_the_ti3(tmp_path) -> None:
+    out = tmp_path / "t.ti3"
+    assert main([str(PRINTTARG), "--dry-run", "--out", str(out)]) == 0
+    table = cgats.read(out)
+    assert table.column("SAMPLE_ID")[:3] == ["1", "2", "3"] and len(table.rows) == 105

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -57,9 +58,27 @@ class Patch:
 @dataclass(frozen=True)
 class Chart:
     patches: list[Patch]
+    """In SAMPLE_ID order, as the .ti3 lists them."""
     device_fields: list[str]
     color_rep: str
     """The device colour space, e.g. ``RGB`` or ``CMYK``."""
+
+    @property
+    def reading_order(self) -> list[Patch]:
+        """The patches as they're laid out on paper: strip A top to bottom, then B, and so on.
+
+        printtarg places patches in random order, so SAMPLE_ID order jumps around the page.
+        """
+        return sorted(self.patches, key=lambda p: _location_key(p.location))
+
+
+def _location_key(location: str) -> tuple[int, str, int, str]:
+    """'A10' -> strip A, patch 10; 'AB3' sorts after 'Z9'."""
+    match = re.fullmatch(r"([A-Za-z]+)(\d+)", location)
+    if not match:
+        return (99, location, 0, location)
+    letters, number = match.groups()
+    return (len(letters), letters.upper(), int(number), location)
 
 
 def load_chart(path: str | Path) -> Chart:
@@ -129,9 +148,9 @@ async def read_patches(
     """
     from .colorimetry import exact_lab_d50  # pylint: disable=import-outside-toplevel
 
-    patches = chart.patches
+    patches = chart.reading_order
     history: list[int] = []  # indexes read in this session, for "r"
-    i = _next_unread(chart, progress, 0)
+    i = _next_unread(patches, progress, 0)
     while i < len(patches):
         done = sum(p.sample_id in progress.reads for p in patches)
         prompt = f"[{done + 1}/{len(patches)}] {patches[i].location}: seat the CR30, Enter (r = redo, q = quit) "
@@ -150,12 +169,11 @@ async def read_patches(
         lab = exact_lab_d50(spectra[0])
         print(f"  {patches[i].location}: L* {lab[0]:.1f} a* {lab[1]:.1f} b* {lab[2]:.1f}", file=sys.stderr)
         history.append(i)
-        i = _next_unread(chart, progress, i + 1)
+        i = _next_unread(patches, progress, i + 1)
     return True
 
 
-def _next_unread(chart: Chart, progress: Progress, start: int) -> int:
-    patches = chart.patches
+def _next_unread(patches: list[Patch], progress: Progress, start: int) -> int:
     return next((k for k in range(start, len(patches)) if patches[k].sample_id not in progress.reads), len(patches))
 
 
