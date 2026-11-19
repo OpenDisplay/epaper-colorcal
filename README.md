@@ -231,7 +231,33 @@ uvx epaper-colorcal --scheme BWGBRY --id TEST --temp 23 --dry-run
 uvx epaper-colorcal --inks black,white,orange=#ff8000 --id TEST --temp 23 --dry-run
 ```
 
-## Output
+## Profiling a printer
+
+The CR30 also measures paper. With [ArgyllCMS](https://www.argyllcms.com/) (`brew install
+argyll-cms`) it can build an ICC profile for a printer and paper:
+
+```bash
+targen -v -d3 -f250 mychart              # patch values (RGB printer)    -> mychart.ti1
+printtarg -v -i i1 -p A4 mychart         # chart layout                  -> mychart.ti2, mychart.ps
+# print mychart.ps (or a TIFF from printtarg -t) with colour management OFF
+uv run epaper-colorcal chart mychart.ti2 --cr30-ble --note "Printer X, paper Y"   # -> mychart.ti3
+colprof -v -D "Printer X, paper Y" mychart                                         # -> mychart.icc
+```
+
+- `chart` asks for each patch in the order it is printed (strip A top to bottom, then B, …):
+  seat the CR30, press Enter. `r` redoes the previous patch, `q` saves and quits. Progress is
+  saved after every patch, so running the same command again continues where you stopped.
+  250 patches take about half an hour.
+- printtarg doesn't know the CR30; `-i i1` lays the chart out for a similar spot instrument,
+  and its patches are large enough for the CR30's 4 mm aperture.
+- The `.ti3` holds each patch's spectrum, so `colprof` can build the profile for other
+  viewing light too (e.g. `-i A` for tungsten).
+- Paper with optical brighteners fluoresces, and the CR30's UV output is unknown: start with
+  unbrightened paper. Use `epaper-colorcal compare colorchecker …` on a reference chart to
+  see how close your CR30 reads.
+- `--dry-run` synthesises the readings from an RGB chart, to try the whole pipeline without
+  hardware.
+
 
 `--format` chooses what's printed on stdout (prompts and notes go to stderr):
 
@@ -311,6 +337,7 @@ whatever `--format` prints.
 | `--format` | `epaper-palette` (default), `oepl` or `spectra` |
 | `--out` | also write the raw spectra to this file |
 | `--static` | by hand, for samples that don't refresh (a printed chart) |
+| `chart CHART.ti2` | read a printed ArgyllCMS chart for an ICC profile (see [Profiling a printer](#profiling-a-printer)) |
 | `--dry-run` | synthetic spectra and a simulated panel, no hardware |
 
 ## How it works

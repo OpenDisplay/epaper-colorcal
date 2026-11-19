@@ -8,6 +8,7 @@ Example (no hardware):
     epaper-colorcal --scheme BWGBRY --id spectra6_13in3 --temp 23 --dry-run > spectra6_13in3.json
 
 To compare two measurements of the same samples: epaper-colorcal compare A B (see --help there).
+To read a printed ArgyllCMS chart for an ICC profile: epaper-colorcal chart CHART.ti2 (see --help there).
 """
 
 from __future__ import annotations
@@ -227,6 +228,10 @@ def main(argv: list[str] | None = None) -> int:
         from .compare import main as compare_main
 
         return compare_main(argv[1:])
+    if argv[:1] == ["chart"]:
+        from .chart import main as chart_main
+
+        return chart_main(argv[1:])
     args = build_parser().parse_args(argv)
     problem = _check_args(args)
     try:
