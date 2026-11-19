@@ -419,8 +419,8 @@ def test_cli_oepl_needs_both_flags(capsys) -> None:
 
 
 class _Refreshing(Instrument):
-    """A panel refreshing like the recorded Hanshow BWY: the old colour stays steady for a while,
-    then it flashes, pauses on black, and settles on the new colour. One phase step per read."""
+    """A refreshing panel: the old colour stays steady for a while, then it flashes, pauses on
+    black, and settles on the new colour. One phase step per read."""
 
     OLD, FLASH_LIGHT, FLASH_DARK, BLACK, NEW = 60.0, 90.0, 20.0, 4.0, 30.0
 

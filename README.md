@@ -183,11 +183,26 @@ Without any of that, show each ink yourself: fill the screen with the ink's nomi
 uv run epaper-colorcal --scheme BWRY --id my_panel --temp 21 --port /dev/ttyUSB0 > my_panel.json
 ```
 
-### Which inks
+### A reference chart
+
+To check the instrument itself, measure a ColorChecker Classic: `--static` reads each patch as
+soon as you press Enter (nothing to wait for on paper).
+
+```bash
+uv run epaper-colorcal --scheme COLORCHECKER24 --static --id cr30_chart --temp 21 \
+  --cr30-ble --format spectra > cr30_chart.json
+uv run epaper-colorcal compare colorchecker cr30_chart.json
+```
+
+`compare A B` shows ΔE00 and the L\*a\*b\* offset per sample, matched by name, in D50/2°. A and B
+can each be `colorchecker` (the chart's reference values; `colorchecker-pre2014` for charts
+made before November 2014), a spectra file from this tool, a file with readings of several
+devices (`--unit-a`/`--unit-b` picks one), or a `name,L,a,b` CSV, e.g. from another instrument.
+
 
 | | |
 |---|---|
-| `--scheme` | a preset: `MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY`, `SEVEN_COLOR` (7-colour ACeP), `GRAY4`, `GRAY16` |
+| `--scheme` | a preset: `MONO`, `BWR`, `BWY`, `BWRY`, `BWGBRY`, `SEVEN_COLOR` (7-colour ACeP), `GRAY4`, `GRAY16`, or `COLORCHECKER24` (the reference chart) |
 | `--inks` | any list, in the panel's index order: `--inks black,white,red,orange=#ff8000` (black, white, red, yellow, blue, green and orange need no colour) |
 | neither | the display's own (OpenDisplay boards report theirs) |
 
@@ -279,6 +294,7 @@ whatever `--format` prints.
 | `--settle` | seconds to wait after an ink is shown, before reading (default 3) |
 | `--format` | `epaper-palette` (default), `oepl` or `spectra` |
 | `--out` | also write the raw spectra to this file |
+| `--static` | by hand, for samples that don't refresh (a printed chart) |
 | `--dry-run` | synthetic spectra and a simulated panel, no hardware |
 
 ## How it works

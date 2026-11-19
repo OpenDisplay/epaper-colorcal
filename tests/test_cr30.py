@@ -214,7 +214,7 @@ async def test_usb_cr30_names_the_port_when_the_device_is_silent(monkeypatch) ->
 
 
 async def test_ble_cr30_retries_a_command_dropped_mid_run(monkeypatch) -> None:
-    # Seen on hardware: after a minute without traffic, the first command got no answer.
+    # A command that gets no answer is sent once more.
     monkeypatch.setattr("epaper_colorcal.cr30.device.BLE_SETTLE", 0)
     monkeypatch.setattr("epaper_colorcal.cr30.device.BLE_CHUNK_DELAY", 0)
     monkeypatch.setattr("epaper_colorcal.cr30.device.TIMEOUT", 0.05)

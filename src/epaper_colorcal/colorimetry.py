@@ -64,9 +64,8 @@ class ColorReading:
 def _reflectance_sd(spectrum: Spectrum) -> SpectralDistribution:
     """A colour SpectralDistribution of the reflectance as a fraction, clipped into [0, 1].
 
-    Spectra are in **percent** (0-100), as the CR30 reports them (verified on hardware: its
-    white cap reads 71-79 %, L* ~ 90). The scale is fixed rather than auto-detected, because a
-    very dark ink can read below 1.5 % in every band and would otherwise be mistaken for a
+    Spectra are in **percent** (0-100). The scale is fixed rather than auto-detected, because
+    a very dark ink can read below 1.5 % in every band and would otherwise be mistaken for a
     near-white 0-1 fraction.
     """
     values = np.clip(np.asarray(spectrum.values, dtype=float) / 100.0, 0.0, 1.0)
