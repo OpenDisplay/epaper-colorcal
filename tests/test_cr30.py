@@ -155,7 +155,8 @@ async def test_usb_cr30_connects_and_measures() -> None:
         assert cr30.info == EXPECTED_INFO
         assert (cr30.model, cr30.serial_number) == ("CR30", "CM454M1246")
         spd = await cr30.measure()
-    assert spd == f.spd_from_ble(BLE["measure_data"]["reply"])
+    assert list(spd.values) == f.spd_from_ble(BLE["measure_data"]["reply"])
+    assert spd.wavelengths == tuple(range(400, 701, 10))
     assert fake.closed
 
 
@@ -168,7 +169,7 @@ async def test_ble_cr30_connects_and_measures(monkeypatch) -> None:
         spd = await cr30.measure()
         with pytest.raises(NotImplementedError):
             await cr30.calibrate_black()
-    assert spd == f.spd_from_usb_pages([USB[f"chunk_{s:02x}"]["reply"] for s in f.USB_SPD_PAGES])
+    assert list(spd.values) == f.spd_from_usb_pages([USB[f"chunk_{s:02x}"]["reply"] for s in f.USB_SPD_PAGES])
     assert not fake.connected
 
 
@@ -198,6 +199,18 @@ async def test_ble_cr30_retries_a_dropped_first_command(monkeypatch) -> None:
     cr30 = BleCR30(client=fake)
     await cr30.connect()
     assert dropped and cr30.info == EXPECTED_INFO
+
+
+async def test_usb_cr30_names_the_port_when_the_device_is_silent(monkeypatch) -> None:
+    monkeypatch.setattr("epaper_colorcal.cr30.device.TIMEOUT", 0.05)
+
+    class _Silent(_FakeSerial):
+        def write(self, data: bytes) -> None:
+            pass  # a CR30 that is switched off: the USB chip is there, nothing answers
+
+    fake = _Silent()
+    with pytest.raises(TimeoutError, match="on /dev/ttyUSB9"):
+        await UsbCR30("/dev/ttyUSB9", streams=(fake, fake)).connect()
 
 
 def test_open_cr30_picks_the_transport() -> None:

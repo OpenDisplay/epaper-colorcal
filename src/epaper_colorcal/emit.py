@@ -18,8 +18,9 @@ from typing import Any
 
 from epaper_dithering import Palette, PaletteEntry
 
-from .colorimetry import CR30_WAVELENGTHS, ColorReading
+from .colorimetry import ColorReading
 from .schemes import Scheme
+from .spectrum import CR30_WAVELENGTHS
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,9 @@ class MeasuredColor:
     name: str
     reading: ColorReading
     spds: list[list[float]]
-    """The individual SPD reads (before averaging) for this color."""
+    """The individual reads (reflectance %, before averaging) for this color."""
+    wavelengths: tuple[float, ...] = tuple(CR30_WAVELENGTHS)
+    """The wavelengths (nm) of the values in ``spds``: the instrument's grid."""
 
 
 def _temp_phrase(temperature_c: float | None) -> str:
@@ -49,6 +52,7 @@ def build_palette(
     colors: list[MeasuredColor],
     *,
     serial: str = "unknown",
+    instrument: str = "CHNSpec CR30",
     note: str = "",
     measured_on: date | None = None,
     temperature_c: float | None = None,
@@ -63,7 +67,7 @@ def build_palette(
 
     entries = [PaletteEntry(c.reading.lab_d65, c.name, scheme.ink(c.name).nominal) for c in colors]
     on = (measured_on or date.today()).isoformat()
-    source = f"CHNSpec CR30 s/n {serial}, measured {on}, D65/2°, {_temp_phrase(temperature_c)}"
+    source = f"{instrument} s/n {serial}, measured {on}, D65/2°, {_temp_phrase(temperature_c)}"
     if note:
         source = f"{note}; {source}"
     return Palette.from_absolute_lab(entries, paper_white_index(colors), measured=True).with_source(source)
@@ -82,6 +86,7 @@ def render_palette(
     colors: list[MeasuredColor],
     *,
     serial: str = "unknown",
+    instrument: str = "CHNSpec CR30",
     note: str = "",
     measured_on: date | None = None,
     temperature_c: float | None = None,
@@ -91,6 +96,7 @@ def render_palette(
         scheme,
         colors,
         serial=serial,
+        instrument=instrument,
         note=note,
         measured_on=measured_on,
         temperature_c=temperature_c,
@@ -104,6 +110,7 @@ def spectra_sidecar(
     colors: list[MeasuredColor],
     *,
     serial: str = "unknown",
+    instrument: str = "CHNSpec CR30",
     measured_on: date | None = None,
     temperature_c: float | None = None,
 ) -> dict[str, Any]:
@@ -113,11 +120,11 @@ def spectra_sidecar(
         "scheme": scheme.name,
         "firmware_id": scheme.firmware_id,
         "inks": [{"name": ink.name, "nominal": ink.nominal} for ink in scheme.inks],
-        "instrument": "CHNSpec CR30",
+        "instrument": instrument,
         "serial": serial,
         "measured_on": (measured_on or date.today()).isoformat(),
         "temperature_c": temperature_c,
-        "wavelengths_nm": CR30_WAVELENGTHS,
+        "wavelengths_nm": list(colors[0].wavelengths) if colors else [],
         "colors": [
             {
                 "name": c.name,

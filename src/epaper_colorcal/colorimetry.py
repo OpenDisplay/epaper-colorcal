@@ -1,7 +1,7 @@
-"""Colorimetry: convert a CR30 spectral reflectance curve to sRGB and CIE Lab.
+"""Colorimetry: convert a spectral reflectance curve to sRGB and CIE Lab.
 
-The CR30 reports a 31-band spectral power distribution (SPD) — really a
-*reflectance* curve — from 400-700 nm in 10 nm steps. Reflectance is the
+An instrument reports a :class:`Spectrum`: reflectance in percent at its own wavelengths
+(the CR30: 31 bands, 400-700 nm in 10 nm steps). Reflectance is the
 illuminant-independent physical property of the panel; the colour you perceive
 depends on which illuminant you view it under. So we integrate the same
 reflectance against different illuminants for different purposes:
@@ -13,8 +13,8 @@ reflectance against different illuminants for different purposes:
   (per the OpenDisplay #color-calibration discussion) are quoted under a 45°/0°,
   D50 spectrophotometer configuration.
 
-We deliberately do the colorimetry here with ``colour-science`` rather than the
-vendored upstream code, so the illuminant/observer are explicit and controllable.
+The colorimetry is done here with ``colour-science``, not by the instrument, so the
+illuminant and observer are explicit and the same for every instrument.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import warnings
 from dataclasses import dataclass
 
 # colour-science warns when optional accelerators (scipy/matplotlib) are absent and when it
-# aligns our 400-700 nm reflectance onto the CMF shape (constant-extrapolated outside the
+# aligns a reflectance (e.g. 400-700 nm) onto the CMF shape (constant-extrapolated outside the
 # measured range, which is fine for reflectance). We only use the pure-numpy "Integration"
 # path, so silence the noise for this CLI tool.
 warnings.filterwarnings("ignore", message=".*related API features are not available.*")
@@ -33,9 +33,11 @@ import colour  # noqa: E402
 import numpy as np  # noqa: E402
 from colour import MSDS_CMFS, SDS_ILLUMINANTS, SpectralDistribution, SpectralShape  # noqa: E402
 
+from .spectrum import CR30_WAVELENGTHS, Spectrum  # noqa: E402
+
 # CR30: 31 bands, 400-700 nm, 10 nm interval.
 CR30_SHAPE = SpectralShape(400, 700, 10)
-CR30_WAVELENGTHS: list[float] = list(np.arange(400, 701, 10, dtype=float))
+
 
 _OBSERVER = "CIE 1931 2 Degree Standard Observer"
 _CMFS = MSDS_CMFS[_OBSERVER]
@@ -59,23 +61,16 @@ class ColorReading:
     """True if the D65 sRGB was outside [0, 1] and had to be clamped (out of gamut)."""
 
 
-def _reflectance_sd(spd: list[float], wavelengths: list[float] | None = None) -> SpectralDistribution:
-    """Build a colour SpectralDistribution from a raw CR30 SPD, normalised to [0, 1].
+def _reflectance_sd(spectrum: Spectrum) -> SpectralDistribution:
+    """A colour SpectralDistribution of the reflectance as a fraction, clipped into [0, 1].
 
-    The CR30 reports reflectance in **percent** (0-100). Verified on hardware
-    (CR30 fw 0.0.20231219): its white calibration cover reads 71-79 % across all
-    bands (L* ~ 90). The scale is fixed rather than auto-detected, because a
-    very dark ink can read below 1.5 % in every band and would otherwise be
-    mistaken for a near-white 0-1 fraction. Values are clipped into [0, 1].
+    Spectra are in **percent** (0-100), as the CR30 reports them (verified on hardware: its
+    white cap reads 71-79 %, L* ~ 90). The scale is fixed rather than auto-detected, because a
+    very dark ink can read below 1.5 % in every band and would otherwise be mistaken for a
+    near-white 0-1 fraction.
     """
-    wl = list(wavelengths) if wavelengths is not None else CR30_WAVELENGTHS
-    if len(spd) != len(wl):
-        raise ValueError(f"SPD has {len(spd)} samples but {len(wl)} wavelengths were given")
-
-    values = np.asarray(spd, dtype=float)
-    values = np.clip(values / 100.0, 0.0, 1.0)
-
-    return SpectralDistribution(dict(zip(wl, values)), name="CR30 reflectance")
+    values = np.clip(np.asarray(spectrum.values, dtype=float) / 100.0, 0.0, 1.0)
+    return SpectralDistribution(dict(zip(spectrum.wavelengths, values)), name="reflectance")
 
 
 def _reflectance_to_xyz(sd: SpectralDistribution, illuminant_name: str) -> np.ndarray:
@@ -92,8 +87,14 @@ def _reflectance_to_xyz(sd: SpectralDistribution, illuminant_name: str) -> np.nd
 
 
 def reading_from_spd(spd: list[float], wavelengths: list[float] | None = None) -> ColorReading:
-    """Convert a (possibly averaged) CR30 SPD into a :class:`ColorReading`."""
-    sd = _reflectance_sd(spd, wavelengths)
+    """A :class:`ColorReading` from reflectance values (percent); without wavelengths, the CR30's grid."""
+    grid = tuple(wavelengths) if wavelengths is not None else tuple(CR30_WAVELENGTHS)
+    return reading_from_spectrum(Spectrum(grid, tuple(float(v) for v in spd)))
+
+
+def reading_from_spectrum(spectrum: Spectrum) -> ColorReading:
+    """Resolve a (possibly averaged) reflectance spectrum into the colour spaces we use."""
+    sd = _reflectance_sd(spectrum)
 
     # sRGB under D65 — reflectance integrated against D65, then the standard sRGB
     # encode (which is itself D65-referenced, so no chromatic adaptation needed).

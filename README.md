@@ -39,6 +39,28 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
   that does it (`--show-command`), or you, by hand.
 - Python 3.11+ (3.13+ to drive OpenDisplay boards, which needs `py-opendisplay`).
 
+## Supported hardware
+
+**Instruments**
+
+| Instrument | Connection | Status |
+|---|---|---|
+| CHNSpec CR30 | USB (`--port`), Bluetooth (`--cr30-ble`) | verified (software V11.3.0.0.20231219); its colour matches the device's own display to ΔE 0.05 |
+
+**Showing the inks**
+
+| Display | Option | Status |
+|---|---|---|
+| OpenDisplay boards | `--address` | verified on a Spectra 6 7.3" (BWGBRY, firmware 2.27); other schemes use the same path but are untested |
+| Anything you can script | `--show-command` | works with any panel; the command is yours |
+| By hand | (default) | works with any panel |
+
+**Platforms:** tested on macOS. Linux and Windows should work (USB serial and Bluetooth go through
+`pyserial` and `bleak`) but are untested.
+
+Missing your instrument or panel? Adding one is a single class: see
+[`docs/adapters.md`](docs/adapters.md). Reports from other hardware and platforms are welcome too.
+
 ## Install
 
 Nothing to install with [uv](https://docs.astral.sh/uv/): `uvx` runs the tool from PyPI in a
@@ -209,21 +231,25 @@ Use it with:
 ## How it works
 
 ```
-CR30 (USB or BLE) ─► 31-band reflectance, % ─► colour-science: XYZ & Lab, D65/2°
-                                                     │
-                       epaper_dithering.Palette.from_absolute_lab ◄┘ ─► epaper-palette JSON
+instrument ─► reflectance spectrum (%, its own wavelengths) ─► colour-science: XYZ & Lab, D65/2°
+                                                                       │
+                       epaper_dithering.Palette.from_absolute_lab ◄────┘ ─► epaper-palette JSON
 ```
 
 The measurement loop (`measure.py`) connects two kinds of adapter:
 
-- **instruments** (`epaper_colorcal.cr30`): the CR30 over USB or Bluetooth, behind one
-  interface; see [`docs/cr30-protocol.md`](docs/cr30-protocol.md) for the protocol;
+- **instruments** (`epaper_colorcal.instruments`): anything that returns a reflectance
+  `Spectrum`. Today that's the CR30 over USB or Bluetooth (`epaper_colorcal.cr30`; protocol in
+  [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a synthetic one for dry runs. A spectrum
+  carries its own wavelengths, so an instrument with a different range (e.g. 380–730 nm) works
+  unchanged;
 - **displays** (`epaper_colorcal.displays`): OpenDisplay, command, manual and simulated. A
   display shows one ink at a time and may also report the panel's inks and temperature.
 
-Supporting another panel or project means adding a display adapter (or, until then, a
-`--show-command` script). Colour maths is done here
-with [`colour-science`](https://www.colour-science.org/), not by the device.
+Colour maths is done here with [`colour-science`](https://www.colour-science.org/), not by the
+instrument, so every instrument is treated the same. Supporting another instrument or panel
+means adding an adapter: see [`docs/adapters.md`](docs/adapters.md) (for panels, a
+`--show-command` script works until then).
 
 ## Temperature
 

@@ -9,7 +9,8 @@ import pytest
 
 from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OpenDisplayDisplay, SimDisplay
 from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
-from epaper_colorcal.measure import measure_all, synthetic_source
+from epaper_colorcal.instruments import SyntheticInstrument
+from epaper_colorcal.measure import measure_all
 from epaper_colorcal.measure_palette import _resolve_scheme, main
 from epaper_colorcal.schemes import Ink, get_scheme, parse_inks
 
@@ -27,7 +28,7 @@ async def test_measure_all_shows_every_ink_in_order_and_reads_each_count_times()
         await orig(index, ink)
 
     display.show = spy  # type: ignore[method-assign]
-    colors = await measure_all(scheme, display, synthetic_source(), count=2)
+    colors = await measure_all(scheme, display, SyntheticInstrument(display), count=2)
 
     assert shown == list(enumerate(scheme.colors))
     assert [c.name for c in colors] == list(scheme.colors)
