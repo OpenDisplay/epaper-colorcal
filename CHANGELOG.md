@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.2.0...v0.3.0) (2026-11-19)
+
+
+### Features
+
+* an instrument port, with spectra that carry their own wavelengths ([e3d65bb](https://github.com/OpenDisplay/epaper-colorcal/commit/e3d65bb3cc32d2efb6e46418e3d61d8b8c0b75a5))
+* an output port, an oepl output, and an OpenEPaperLink display ([378c3df](https://github.com/OpenDisplay/epaper-colorcal/commit/378c3df31a01816246ac0cf29714d2b9221c4d04))
+* measure any panel: custom inks, a command display, and display adapters ([0a87150](https://github.com/OpenDisplay/epaper-colorcal/commit/0a871508a5b39bdc096046d32389c7a154240229))
+
+
+### Bug Fixes
+
+* never measure a refreshing panel; measure OEPL tags with the full refresh ([8cecbf3](https://github.com/OpenDisplay/epaper-colorcal/commit/8cecbf3d80b641071570869a6be92cfab685d92c))
+
+
+### Documentation
+
+* describe measuring any panel, with inks, commands or by hand ([afc8f7c](https://github.com/OpenDisplay/epaper-colorcal/commit/afc8f7c41b715f2374cb3ad42b10b6d72b3000a1))
+* describe the instrument port ([eed89e5](https://github.com/OpenDisplay/epaper-colorcal/commit/eed89e5dc8b381b6d769c4fdd47a2f4e2cb45f61))
+* document outputs and the OpenEPaperLink display ([60c2e6d](https://github.com/OpenDisplay/epaper-colorcal/commit/60c2e6d69b429bdc373741df45e5e7e213a174de))
+* list the supported hardware and explain how to add an adapter ([199e45c](https://github.com/OpenDisplay/epaper-colorcal/commit/199e45c35cde1481b95526470dc075a32ab54985))
+* settling, the OEPL refresh mode, and OEPL verified on a tag ([9e9e16b](https://github.com/OpenDisplay/epaper-colorcal/commit/9e9e16bb84d82c4deee0d4f8e8ae4705f2719e17))
+
 ## [0.2.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.1.0...v0.2.0) (2026-11-19)
 
 
