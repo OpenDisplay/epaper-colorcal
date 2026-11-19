@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .colorimetry import CR30_WAVELENGTHS
+from .spectrum import CR30_WAVELENGTHS
 
 _WL = np.asarray(CR30_WAVELENGTHS, dtype=float)
 

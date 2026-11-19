@@ -16,14 +16,14 @@ import sys
 from typing import TYPE_CHECKING
 
 from .emit import MeasuredColor, render_palette, spectra_sidecar, write_sidecar
-from .measure import cr30_source, measure_all, measure_color, synthetic_source
+from .measure import measure_all, measure_color
 from .schemes import SCHEMES, Scheme, get_scheme, parse_inks
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .cr30 import CR30
     from .displays import Display
+    from .instruments import Instrument
 
 __all__ = ["build_colors", "build_parser", "main", "measure_color"]
 
@@ -46,23 +46,38 @@ def _display(args: argparse.Namespace) -> Display:
     return ManualDisplay()
 
 
-async def _open_cr30(args: argparse.Namespace) -> CR30:
-    """Connect to the CR30 on USB (--port) or BLE (--cr30-ble), optionally calibrating it."""
+def _instrument(args: argparse.Namespace, display: Display) -> Instrument:
+    from .displays import SimDisplay
+    from .instruments import SyntheticInstrument
+
+    if args.dry_run:
+        assert isinstance(display, SimDisplay)
+        return SyntheticInstrument(display)
     from .cr30 import open_cr30
 
-    cr30 = open_cr30(port=args.port, ble=args.cr30_ble)
-    await cr30.connect()
+    return open_cr30(port=args.port, ble=args.cr30_ble)
+
+
+async def _connect_instrument(args: argparse.Namespace, instrument: Instrument) -> None:
+    """Connect the instrument, optionally calibrating it."""
+    try:
+        await instrument.connect()
+    except TimeoutError as exc:
+        raise SystemExit(
+            f"{exc}. Is the CR30 switched on? It turns itself off when idle: press its button, then try again."
+        ) from exc
+    if args.dry_run:
+        return
     via = f"USB {args.port}" if args.port else "BLE"
-    print(f"Connected to {cr30.model} (s/n {cr30.serial_number}) over {via}.", file=sys.stderr)
+    print(f"Connected to {instrument.description} (s/n {instrument.serial_number}) over {via}.", file=sys.stderr)
 
     if args.calibrate:
         await asyncio.to_thread(input, "Close the CR30 cap fully (black calibration), then press Enter… ")
-        if not await cr30.calibrate_black():
+        if not await instrument.calibrate_black():
             raise SystemExit("Black calibration failed.")
         await asyncio.to_thread(input, "Keep the cap closed (white calibration), then press Enter… ")
-        if not await cr30.calibrate_white():
+        if not await instrument.calibrate_white():
             raise SystemExit("White calibration failed.")
-    return cr30
 
 
 def _resolve_scheme(requested: Scheme | None, declared: Scheme | None) -> Scheme:
@@ -77,29 +92,29 @@ def _resolve_scheme(requested: Scheme | None, declared: Scheme | None) -> Scheme
     return requested
 
 
-async def _measure(args: argparse.Namespace, requested: Scheme | None) -> tuple[Scheme, list[MeasuredColor], str]:
+async def _measure(
+    args: argparse.Namespace, requested: Scheme | None
+) -> tuple[Scheme, list[MeasuredColor], Instrument]:
     display = _display(args)
     if args.temp is None:
         args.temp = await display.temperature()
         if args.temp is not None:
             print(f"Panel temperature: {args.temp:g} °C, reported by the display (--temp overrides).", file=sys.stderr)
 
-    cr30 = None if args.dry_run else await _open_cr30(args)
+    instrument = _instrument(args, display)
+    await _connect_instrument(args, instrument)
     try:
         if display.automatic and not args.dry_run and sys.stdin.isatty():
             await asyncio.to_thread(input, "Seat the CR30 flat on the panel, then press Enter to start… ")
         await display.connect()
         try:
             scheme = _resolve_scheme(requested, await display.scheme())
-            read = synthetic_source() if cr30 is None else cr30_source(cr30)
-            colors = await measure_all(scheme, display, read, args.count)
+            colors = await measure_all(scheme, display, instrument, args.count)
         finally:
             await display.close()
     finally:
-        if cr30 is not None:
-            await cr30.close()
-    serial = args.serial or (cr30.serial_number if cr30 is not None else "DRYRUN")
-    return scheme, colors, serial
+        await instrument.close()
+    return scheme, colors, instrument
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,7 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    scheme, colors, serial = asyncio.run(_measure(args, requested))
+    scheme, colors, instrument = asyncio.run(_measure(args, requested))
+    serial = args.serial or instrument.serial_number
 
     if args.temp is None:
         print(
@@ -172,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
             "this palette is recorded with the temperature UNRECORDED.",
             file=sys.stderr,
         )
-    print(render_palette(scheme, colors, serial=serial, note=args.note, temperature_c=args.temp))
+    print(
+        render_palette(
+            scheme, colors, serial=serial, instrument=instrument.description, note=args.note, temperature_c=args.temp
+        )
+    )
 
     if any(c.reading.clipped for c in colors):
         print(
@@ -182,7 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.out:
         write_sidecar(
-            args.out, spectra_sidecar(args.palette_id, scheme, colors, serial=serial, temperature_c=args.temp)
+            args.out,
+            spectra_sidecar(
+                args.palette_id,
+                scheme,
+                colors,
+                serial=serial,
+                instrument=instrument.description,
+                temperature_c=args.temp,
+            ),
         )
         print(f"Wrote raw spectra to {args.out}", file=sys.stderr)
     return 0

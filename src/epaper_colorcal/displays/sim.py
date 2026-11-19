@@ -12,5 +12,10 @@ if TYPE_CHECKING:
 
 
 class SimDisplay(Display):
+    def __init__(self) -> None:
+        self.current: Ink | None = None
+        """The ink on the simulated panel, for a :class:`~epaper_colorcal.instruments.SyntheticInstrument`."""
+
     async def show(self, index: int, ink: Ink) -> None:
+        self.current = ink
         print(f"[sim] would show ink {index} ({ink.name}, {ink.nominal})", file=sys.stderr)

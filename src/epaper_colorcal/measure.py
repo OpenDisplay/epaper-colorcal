@@ -1,56 +1,48 @@
 """The measurement loop: show each ink, read it ``count`` times, average.
 
 It joins the two ports: a :class:`~epaper_colorcal.displays.Display` puts the ink on the
-panel, an :data:`SpdSource` reads its reflectance (a CR30, or synthetic spectra for a dry
-run). Manual and automatic measurements are the same loop with different displays.
+panel, an :class:`~epaper_colorcal.instruments.Instrument` reads its reflectance. Manual and
+automatic measurement, real and simulated, are all this one loop with different adapters.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from .colorimetry import average_spds, reading_from_spd
+from .colorimetry import reading_from_spectrum
 from .emit import MeasuredColor
-from .synthetic import IDEAL_SRGB, synthetic_spd
+from .spectrum import Spectrum, average_spectra
 
 if TYPE_CHECKING:
-    from .cr30 import CR30
     from .displays import Display
-    from .schemes import Ink, Scheme
-
-SpdSource = Callable[["Ink"], Awaitable[list[float]]]
-"""One reflectance read (31 bands, percent) of the ink currently shown."""
+    from .instruments import Instrument
+    from .schemes import Scheme
 
 
-def measure_color(name: str, spds: list[list[float]]) -> MeasuredColor:
-    """Average the reads of one ink and resolve it to sRGB/Lab."""
-    return MeasuredColor(name=name, reading=reading_from_spd(average_spds(spds)), spds=spds)
+def measure_color(name: str, spds: list[list[float]], wavelengths: tuple[float, ...] | None = None) -> MeasuredColor:
+    """Average the reads of one ink (reflectance %) and resolve it to sRGB/Lab.
+
+    Without ``wavelengths`` the values are on the CR30's grid (400-700 nm, 10 nm).
+    """
+    spectra = [Spectrum.cr30(s) if wavelengths is None else Spectrum(wavelengths, tuple(s)) for s in spds]
+    return measure_spectra(name, spectra)
 
 
-async def measure_all(scheme: Scheme, display: Display, read: SpdSource, count: int) -> list[MeasuredColor]:
+def measure_spectra(name: str, spectra: list[Spectrum]) -> MeasuredColor:
+    """Average several reads of one ink and resolve it to sRGB/Lab."""
+    mean = average_spectra(spectra)
+    return MeasuredColor(
+        name=name,
+        reading=reading_from_spectrum(mean),
+        spds=[list(s.values) for s in spectra],
+        wavelengths=mean.wavelengths,
+    )
+
+
+async def measure_all(scheme: Scheme, display: Display, instrument: Instrument, count: int) -> list[MeasuredColor]:
     """Show every ink of ``scheme`` on ``display`` in order and read each ``count`` times."""
     colors = []
     for index, ink in enumerate(scheme.inks):
         await display.show(index, ink)
-        colors.append(measure_color(ink.name, [await read(ink) for _ in range(count)]))
+        colors.append(measure_spectra(ink.name, [await instrument.measure() for _ in range(count)]))
     return colors
-
-
-def cr30_source(cr30: CR30) -> SpdSource:
-    async def read(_ink: Ink) -> list[float]:
-        return await cr30.measure()
-
-    return read
-
-
-def synthetic_source() -> SpdSource:
-    """Plausible spectra for a dry run: dimmed e-paper colours for known inks, else the nominal."""
-    reads = 0
-
-    async def read(ink: Ink) -> list[float]:
-        nonlocal reads
-        reads += 1  # a new seed per read, so averaging is meaningful
-        return synthetic_spd(IDEAL_SRGB.get(ink.name, ink.rgb), jitter=0.01, seed=reads)
-
-    return read

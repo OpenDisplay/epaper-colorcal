@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any
 
+from ..instruments import Instrument
+from ..spectrum import Spectrum
 from . import frames as f
 from .frames import DeviceInfo, FrameError
 
@@ -27,8 +29,8 @@ MEASURE_TIMEOUT = 6.0
 CALIBRATE_TIMEOUT = 13.0
 
 
-class CR30(ABC):
-    """A connected CR30. Use as ``async with`` or call :meth:`connect`/:meth:`close`."""
+class CR30(Instrument):
+    """A CHNSpec CR30. Use as ``async with`` or call :meth:`connect`/:meth:`close`."""
 
     info: DeviceInfo | None = None
 
@@ -38,19 +40,17 @@ class CR30(ABC):
     @abstractmethod
     async def close(self) -> None: ...
 
-    @abstractmethod
-    async def measure(self) -> list[float]:
-        """Trigger one scan; return its 31-band reflectance in percent.
+    async def measure(self) -> Spectrum:
+        """Trigger one scan; return its 31-band reflectance (percent, 400-700 nm).
 
         On a steady sample, consecutive scans can be bit-identical: the device's output is
         quantised. That is a real reading, not a stale one.
         """
+        return Spectrum(tuple(float(w) for w in f.WAVELENGTHS), tuple(await self._read_spd()))
 
-    async def calibrate_black(self) -> bool:
-        raise NotImplementedError(f"calibration is not supported over {type(self).__name__}")
-
-    async def calibrate_white(self) -> bool:
-        raise NotImplementedError(f"calibration is not supported over {type(self).__name__}")
+    @abstractmethod
+    async def _read_spd(self) -> list[float]:
+        """Trigger one scan and read its 31 reflectance values over this transport."""
 
     @property
     def model(self) -> str:
@@ -60,12 +60,9 @@ class CR30(ABC):
     def serial_number(self) -> str:
         return self.info.serial if self.info else "unknown"
 
-    async def __aenter__(self) -> CR30:
-        await self.connect()
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        await self.close()
+    @property
+    def description(self) -> str:
+        return "CHNSpec CR30"
 
 
 class UsbCR30(CR30):
@@ -97,7 +94,7 @@ class UsbCR30(CR30):
                 await self._writer.wait_closed()
         self._reader = self._writer = None
 
-    async def measure(self) -> list[float]:
+    async def _read_spd(self) -> list[float]:
         await self._exchange(f.START_COMMAND, f.CMD_MEASURE, 0, timeout=MEASURE_TIMEOUT)
         pages = [await self._exchange(f.START_COMMAND, f.CMD_MEASURE, sub) for sub in f.USB_SPD_PAGES]
         await self._exchange(f.START_COMMAND, f.CMD_MEASURE, f.USB_SPD_END)
@@ -122,7 +119,10 @@ class UsbCR30(CR30):
     async def _exchange(self, start: int, cmd: int, sub: int, *, timeout: float | None = None) -> bytes:
         self._writer.write(f.usb_frame(start, cmd, sub))
         await self._writer.drain()
-        reply = await asyncio.wait_for(self._reader.readexactly(f.USB_FRAME_LEN), timeout or TIMEOUT)
+        try:
+            reply = await asyncio.wait_for(self._reader.readexactly(f.USB_FRAME_LEN), timeout or TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"CR30 did not answer 0x{cmd:02x} on {self._port}") from exc
         return f.check_reply(reply, cmd, length=f.USB_FRAME_LEN)
 
 
@@ -157,7 +157,7 @@ class BleCR30(CR30):
             with contextlib.suppress(Exception):
                 await self._client.disconnect()
 
-    async def measure(self) -> list[float]:
+    async def _read_spd(self) -> list[float]:
         nonce = tuple(os.urandom(4))
         ack = await self._command(f.CMD_MEASURE, (0, *nonce, 0), 10, timeout=MEASURE_TIMEOUT)
         if ack[3] != 0:
