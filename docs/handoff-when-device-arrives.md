@@ -73,29 +73,29 @@ validated by `epaper_dithering.Palette` itself).
 ```
 src/epaper_colorcal/
   colorimetry.py     SPD (percent) → absolute Lab(D65) + sRGB(D65) + Lab(D50) via colour-science
-  schemes.py         MONO/BWR/BWY/BWRY/BWGBRY: ink names in palette-index order (matches py-opendisplay's palettes)
+  schemes.py         Ink/Scheme; presets (MONO…BWGBRY, SEVEN_COLOR, GRAY4/16) and --inks custom lists
   cr30/              our CR30 client: frames.py (pure encode/decode), device.py (UsbCR30, BleCR30, open_cr30)
   synthetic.py       fake SPDs for --dry-run; IDEAL_SRGB per color name
   emit.py            builds the epaper-palette (Palette.from_absolute_lab) + raw-spectra JSON sidecar
-  measure_palette.py CLI: --scheme/--id/--temp/--count/--port/--dry-run + interactive flags
-  interactive.py     PanelDriver protocol, SimPanel, OpenDisplayPanel (BLE), measure_interactive()
+  measure.py         the loop: show each ink on a Display, read it with the instrument, average
+  displays/          Display port + adapters: OpenDisplay (BLE), command (--show-command), manual, sim
+  measure_palette.py CLI: picks the adapters from the flags and runs the loop
 docs/
   cr30-protocol.md   the verified wire protocol, USB and BLE
   handoff-when-device-arrives.md   ← this file
-tests/               test_dry_run.py, test_interactive.py, test_cr30.py (+ fixtures/cr30_frames.json)
+tests/               test_dry_run.py, test_displays.py, test_schemes.py, test_cr30.py (+ fixtures/cr30_frames.json)
 ```
 
 Commands:
 
 ```bash
 uv sync --all-extras
-uv run pytest -q                       # 15 passed
-uv run ruff check .                    # clean
-uv run mypy src/epaper_colorcal        # clean
+uv run pytest -q
+uv run prek run --all-files            # ruff, ruff-format, mypy (strict), pylint
 
 # hardware-free demos:
 uv run epaper-colorcal --scheme BWGBRY --id test --temp 23 --dry-run > test.json
-uv run epaper-colorcal --scheme BWGBRY --id test --temp 23 --interactive --dry-run
+uv run epaper-colorcal --inks black,white,orange=#ff8000 --id test --temp 23 --dry-run
 ```
 
 ## Sibling repos this integrates with
