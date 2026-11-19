@@ -8,11 +8,10 @@ The CR30 speaks one command set over two transports with two framings:
   ``[0xBB, op, *params, 0xFF, checksum]``. The device ignores 60-byte frames here.
 
 Both use one checksum rule in both directions: the low byte of the sum of every
-preceding byte, the ``0xFF`` marker included. Verified on a CR30 (fw 0.0.20231219).
+preceding byte, the ``0xFF`` marker included. See ``docs/cr30-protocol.md``.
 
 Protocol knowledge: USB from itohio's reverse engineering
 (https://itohi.com/colorimetry/reverse-engineering-cr30/), BLE from the vendor app.
-Every layout here was confirmed against captured frames (``tests/fixtures/cr30_frames.json``).
 """
 
 from __future__ import annotations

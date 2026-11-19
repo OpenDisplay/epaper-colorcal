@@ -1,7 +1,4 @@
-"""OpenDisplay board over Bluetooth, via ``py-opendisplay`` (the ``opendisplay`` extra).
-
-Validated on a Spectra 6 7.3" (BWGBRY) board with a CR30.
-"""
+"""OpenDisplay board over Bluetooth, via ``py-opendisplay`` (the ``opendisplay`` extra)."""
 
 from __future__ import annotations
 

@@ -113,7 +113,7 @@ class UsbCR30(CR30):
 
     async def _calibrate(self, cmd: int) -> bool:
         reply = await self._exchange(f.START_COMMAND, cmd, 0, timeout=CALIBRATE_TIMEOUT)
-        return reply[6] == 1  # payload[2]; verified on hardware (see docs/cr30-protocol.md)
+        return reply[6] == 1  # payload[2] (see docs/cr30-protocol.md)
 
     async def _drain(self) -> None:
         """Discard anything already buffered (e.g. a button-press frame)."""
@@ -170,12 +170,10 @@ class BleCR30(CR30):
             self._reply.set_result(bytes(self._buffer))
 
     async def _command(self, op: int, params: tuple[int, ...], length: int, *, timeout: float | None = None) -> bytes:
-        """Send one command and return its reply, retrying once.
+        """Send one command and return its reply.
 
-        A command is occasionally not answered at all (0 bytes), seen on hardware right after
-        connecting and as the first command after a minute without traffic; the module seems to
-        doze and miss the wake byte. A second attempt, with a fresh wake byte, has worked each
-        time. (Repeating a measurement trigger only takes one more scan.)
+        The module occasionally misses a command, typically after a pause; it gets one retry
+        with a fresh wake byte. (Repeating a measurement trigger only takes one more scan.)
         """
         try:
             return await self._attempt(op, params, length, timeout=timeout)

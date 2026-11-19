@@ -6,6 +6,8 @@ Prompts and notes go to stderr. ``--dry-run`` needs no hardware.
 
 Example (no hardware):
     epaper-colorcal --scheme BWGBRY --id spectra6_13in3 --temp 23 --dry-run > spectra6_13in3.json
+
+To compare two measurements of the same samples: epaper-colorcal compare A B (see --help there).
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ def _display(args: argparse.Namespace) -> Display:
         )
     if args.show_command:
         return CommandDisplay(args.show_command, settle_seconds=args.settle)
-    return ManualDisplay()
+    return ManualDisplay(static=args.static)
 
 
 def _instrument(args: argparse.Namespace, display: Display) -> Instrument:
@@ -192,6 +194,11 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument(
         "--settle", type=float, default=3.0, help="Seconds to wait after the ink is shown, before reading (default 3)"
     )
+    show.add_argument(
+        "--static",
+        action="store_true",
+        help="By hand, for samples that don't refresh (e.g. --scheme COLORCHECKER24): read right after Enter",
+    )
     show.add_argument("--interactive", action="store_true", help=argparse.SUPPRESS)  # pre-0.3 flag; now implied
     return p
 
@@ -202,12 +209,19 @@ def _check_args(args: argparse.Namespace) -> str | None:
         return "--address, --oepl-ap and --show-command all show the inks; pick one"
     if bool(args.oepl_ap) != bool(args.oepl_tag):
         return "--oepl-ap and --oepl-tag go together"
+    if args.static and (args.address or args.oepl_ap or args.show_command):
+        return "--static is for samples shown by hand, not with --address, --oepl-ap or --show-command"
     if not args.dry_run and not (args.port or args.cr30_ble):
         return "connect the CR30 with --port or --cr30-ble (or use --dry-run)"
     return None
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["compare"]:
+        from .compare import main as compare_main
+
+        return compare_main(argv[1:])
     args = build_parser().parse_args(argv)
     problem = _check_args(args)
     try:

@@ -42,11 +42,9 @@ def measure_spectra(name: str, spectra: list[Spectrum]) -> MeasuredColor:
     )
 
 
-# Settling, sized from a recorded refresh of a Hanshow 2.00" BWY (yellow, full refresh): after
-# the tag reported the transfer complete it kept showing the old colour, perfectly steady, for
-# about 6 s, flashed for 11 s, then held black steady for about 9 s before yellow built up
-# (about 40 s in all). So the colour must first move away from what the panel showed before
-# (the refresh has started), and then hold steady for longer than such a pause.
+# A panel can keep showing the old colour for a few seconds after it has the new image, and can
+# pause on an intermediate colour mid-refresh. So the colour must first move away from what the
+# panel showed before (the refresh has started), then hold steady for longer than such a pause.
 SETTLE_CHANGE = 3.0  # ΔE76 away from the previous colour that counts as "the refresh started"
 SETTLE_TOLERANCE = 1.0  # ΔE76 within which reads count as steady (the CR30's noise is about 0.1)
 SETTLE_STABLE = 15.0  # seconds the colour must hold steady

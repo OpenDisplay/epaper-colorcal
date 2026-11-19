@@ -104,10 +104,14 @@ _ALIASES = {"GRAYSCALE_4": "GRAY4", "GRAYSCALE_16": "GRAY16", "ACEP": "SEVEN_COL
 
 
 def get_scheme(name: str) -> Scheme:
-    """A preset by name (case-insensitive)."""
+    """A preset by name (case-insensitive). ``COLORCHECKER24`` is the 24-patch reference chart."""
     key = _ALIASES.get(name.upper(), name.upper())
+    if key in ("COLORCHECKER24", "COLORCHECKER"):
+        from .references import colorchecker24_scheme  # pylint: disable=import-outside-toplevel,cyclic-import
+
+        return colorchecker24_scheme()
     if key not in SCHEMES:
-        raise ValueError(f"unknown scheme {name!r}; choose one of: {', '.join(SCHEMES)}")
+        raise ValueError(f"unknown scheme {name!r}; choose one of: {', '.join(SCHEMES)}, COLORCHECKER24")
     return SCHEMES[key]
 
 
