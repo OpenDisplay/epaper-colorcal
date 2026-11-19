@@ -8,7 +8,14 @@ import sys
 import pytest
 
 from epaper_colorcal.colorimetry import reading_from_spectrum
-from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
+from epaper_colorcal.displays import (
+    ATCDisplay,
+    CommandDisplay,
+    ManualDisplay,
+    OEPLDisplay,
+    OpenDisplayDisplay,
+    SimDisplay,
+)
 from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
 from epaper_colorcal.instruments import Instrument, SyntheticInstrument
 from epaper_colorcal.measure import measure_all, wait_until_settled
@@ -565,3 +572,111 @@ def test_a_stopped_run_reports_and_exits_130(monkeypatch, capsys) -> None:
     monkeypatch.setattr("epaper_colorcal.measure_palette._measure", stopped)
     assert main(["--scheme", "MONO", "--id", "S", "--temp", "20", "--dry-run"]) == 130
     assert "Stopped" in capsys.readouterr().err
+
+
+# ── ATC BLE ─────────────────────────────────────────────────────────────────
+
+
+class _FakeATCLib:
+    """Stands in for py_atc_ble_oepl."""
+
+    MANUFACTURER_ID = 0x1337
+    DitherMode = type("DitherMode", (), {"NONE": "none"})
+    FitMode = type("FitMode", (), {"STRETCH": "stretch"})
+
+    class DiscoveredDevice:
+        def __init__(self, mac_address, name, rssi, device, advertising_data):
+            self.mac_address, self.name, self.device, self.advertising_data = (
+                mac_address,
+                name,
+                device,
+                advertising_data,
+            )
+
+    class ATCProtocol:
+        def parse_advertising_data(self, data: bytes):
+            return type("Adv", (), {"temperature": data[0]})()
+
+    class ATCDevice:
+        instances: list = []
+
+        def __init__(self, mac_address, ble_device=None):
+            self.mac_address, self.ble_device = mac_address, ble_device
+            self.width, self.height, self.color_scheme = 152, 200, 2  # BWY
+            self.uploads: list = []
+            self.closed = False
+            _FakeATCLib.ATCDevice.instances.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            self.closed = True
+
+        async def upload_image(self, image, **kwargs):
+            self.uploads.append((image, kwargs))
+            return True
+
+
+def _advert(name: str, *, with_data: bool, temperature: int = 23):
+    device = type("Dev", (), {"address": f"UUID-{name}", "name": name})()
+    data = {0x1337: bytes([temperature, 0])} if with_data else {}
+    return device, type("Adv", (), {"local_name": name, "manufacturer_data": data, "rssi": -60})()
+
+
+@pytest.fixture
+def fake_atc(monkeypatch):
+    pytest.importorskip("bleak")
+    adverts: list = []
+
+    class Scanner:
+        def __init__(self, callback):
+            self.callback = callback
+
+        async def __aenter__(self):
+            for device, adv in adverts:
+                self.callback(device, adv)
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+    _FakeATCLib.ATCDevice.instances = []
+    monkeypatch.setattr("bleak.BleakScanner", Scanner)
+    monkeypatch.setattr("epaper_colorcal.displays.atc._library", lambda: _FakeATCLib)
+    return adverts
+
+
+async def test_atc_finds_a_tag_from_any_of_its_adverts(fake_atc) -> None:
+    # A packet without the manufacturer data last must not hide the tag (it alternates).
+    fake_atc += [_advert("ATC_05D611", with_data=True), _advert("ATC_05D611", with_data=False)]
+    display = ATCDisplay("05d611")
+    assert await display.temperature() == 23
+    await display.connect()
+    assert _FakeATCLib.ATCDevice.instances[0].ble_device.address == "UUID-ATC_05D611"
+    assert (await display.scheme()).name == "BWY"
+
+
+async def test_atc_uploads_a_solid_undithered_image(fake_atc) -> None:
+    fake_atc.append(_advert("ATC_05D611", with_data=True))
+    display = ATCDisplay("ATC_05D611")
+    await display.connect()
+    await display.show(2, Ink("yellow", "#ffff00"))
+    image, kwargs = _FakeATCLib.ATCDevice.instances[0].uploads[0]
+    assert image.size == (152, 200) and image.getcolors() == [(152 * 200, (255, 255, 0))]
+    assert kwargs == {"dither_mode": "none", "fit": "stretch"}
+    assert not ATCDisplay.settled_after_show  # the loop waits for the refresh
+    await display.close()
+    assert _FakeATCLib.ATCDevice.instances[0].closed
+
+
+async def test_atc_temperature_outside_the_plausible_range_is_no_reading(fake_atc) -> None:
+    fake_atc.append(_advert("ATC_05D611", with_data=True, temperature=200))
+    assert await ATCDisplay("05D611").temperature() is None
+
+
+async def test_atc_tag_not_found_is_explained(fake_atc, monkeypatch) -> None:
+    monkeypatch.setattr("epaper_colorcal.displays.atc.DISCOVERY_TIMEOUT", 0.05)
+    fake_atc.append(_advert("ATC_164840", with_data=True))
+    with pytest.raises(SystemExit, match="No ATC BLE tag '05D611'"):
+        await ATCDisplay("05D611").connect()

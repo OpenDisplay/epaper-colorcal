@@ -52,7 +52,8 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
 | Display | Option | Status |
 |---|---|---|
 | OpenDisplay boards | `--address` | verified on a Spectra 6 7.3" (BWGBRY, firmware 2.27); other schemes use the same path but are untested |
-| OpenEPaperLink tags | `--oepl-ap`, `--oepl-tag` | through the access point, with [py-oepl](https://pypi.org/project/py-oepl/); verified on an M2 2.6" (BWR) |
+| OpenEPaperLink tags | `--oepl-ap`, `--oepl-tag` | through the access point, with [py-oepl](https://pypi.org/project/py-oepl/); verified on M2 2.6"/2.9" (BWR) and a Hanshow 2.00" (BWY) |
+| Tags with ATC BLE OEPL firmware | `--atc` | directly over Bluetooth, with [py-atc-ble-oepl](https://pypi.org/project/py-atc-ble-oepl/); verified on a Hanshow 2.00" (BWY), matching its access-point measurement within ΔE 0.4 |
 | Anything you can script | `--show-command` | works with any panel; the command is yours |
 | By hand | (default) | works with any panel |
 
@@ -86,6 +87,7 @@ The extras:
 | `ble` | `bleak` | the CR30 over Bluetooth (`--cr30-ble`) |
 | `opendisplay` | `py-opendisplay` | driving an OpenDisplay board (`--address`) |
 | `oepl` | `py-oepl` | driving an OpenEPaperLink tag (`--oepl-ap`) |
+| `atc` | `py-atc-ble-oepl` | driving a tag with ATC BLE firmware (`--atc`) |
 
 `--dry-run` and the tests need none of them.
 
@@ -159,6 +161,19 @@ The refresh waveform changes the colours, red most of all, so the tag is measure
 restored afterwards; the panel keeps showing the last ink until it gets its next image.
 
 `--format oepl` prints a `perceptual` block for the tag's type, see [Output](#output).
+
+### With an ATC BLE tag (automatic, no access point)
+
+Tags running ATC BLE OEPL firmware can be driven directly over Bluetooth, which skips the
+access point's check-in cycle:
+
+```bash
+uv run epaper-colorcal --id hs_2in0_bwy --atc ATC_05D611 --cr30-ble --format oepl > perceptual.json
+```
+
+`--atc` takes the tag's advertised name (`ATC_05D611`, or just `05D611`) or its address. The tag
+reports its colours and temperature. It advertises only now and then, so finding it can take
+up to a minute.
 
 ### With a command (any panel you can script)
 
@@ -289,6 +304,7 @@ whatever `--format` prints.
 | `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
 | `--calibrate` | explicit black/white calibration first (USB) |
 | `--address`, `--key` | show the inks on an OpenDisplay board |
+| `--atc` | show the inks on a tag with ATC BLE firmware |
 | `--oepl-ap`, `--oepl-tag`, `--oepl-lut`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag |
 | `--show-command` | show the inks by running a command |
 | `--settle` | seconds to wait after an ink is shown, before reading (default 3) |
@@ -313,8 +329,8 @@ adapter turns the result into a file:
   [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a synthetic one for dry runs. A spectrum
   carries its own wavelengths, so an instrument with a different range (e.g. 380–730 nm) works
   unchanged;
-- **displays** (`epaper_colorcal.displays`): OpenDisplay, OpenEPaperLink, command, manual and
-  simulated. A display shows one ink at a time and may also report the panel's inks and
+- **displays** (`epaper_colorcal.displays`): OpenDisplay, OpenEPaperLink (access point or ATC
+  BLE), command, manual and simulated. A display shows one ink at a time and may also report the panel's inks and
   temperature;
 - **outputs** (`epaper_colorcal.outputs`): what the measurement becomes (`--format`).
 

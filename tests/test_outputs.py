@@ -47,6 +47,12 @@ def test_oepl_output_is_white_relative_srgb_for_every_colour_in_order() -> None:
     assert '"yellow": [' in text  # colours inline, as in the tag-type files
 
 
+def test_oepl_output_uses_oepl_order_whatever_the_scheme_order() -> None:
+    # e.g. measured over ATC BLE, where the scheme comes in OpenDisplay order
+    text = get_output("oepl").render(_measurement(get_scheme("BWRY")))  # black, white, yellow, red
+    assert list(json.loads(text)["perceptual"]) == ["white", "black", "red", "yellow"]
+
+
 def test_spectra_output_has_the_raw_reads() -> None:
     data = json.loads(get_output("spectra").render(_measurement(get_scheme("MONO"))))
     assert data["instrument"] == "CHNSpec CR30" and len(data["wavelengths_nm"]) == 31

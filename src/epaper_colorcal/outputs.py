@@ -62,13 +62,17 @@ class EpaperPaletteOutput(Output):
         )
 
 
+OEPL_ORDER = ("white", "black", "red", "yellow")
+
+
 class OEPLOutput(Output):
     """A ``perceptual`` block for an OpenEPaperLink tag type (``resources/tagtypes/*.json``).
 
     OEPL's web UI draws (and dithers) tag images with ``perceptual`` when a tag type has one:
     sRGB 0-255 relative to the panel's white, so white stays ``[255, 255, 255]``. Every ink is
-    written, in scheme order (the tag's colour-table order when the scheme came from the tag):
-    the web UI reads the block as a list, so a missing colour would shift the ones after it.
+    written, in OEPL's colour-table order (white, black, red, yellow, then any others in scheme
+    order) whichever display measured it: the web UI reads the block as a list, so the order
+    must match the tag type's colour table.
     """
 
     name = "oepl"
@@ -77,8 +81,9 @@ class OEPLOutput(Output):
         m = measurement
         palette = build_palette(m.scheme, m.colors, serial=m.serial, instrument=m.instrument)
         rgb = dict(zip(m.scheme.colors, palette.preview_rgb()))
+        order = [n for n in OEPL_ORDER if n in rgb] + [n for n in m.scheme.colors if n not in OEPL_ORDER]
         # Inline [r, g, b] per colour, as the tag-type files write them.
-        lines = [f"    {json.dumps(name)}: {json.dumps(list(rgb[name]))}" for name in m.scheme.colors]
+        lines = [f"    {json.dumps(name)}: {json.dumps(list(rgb[name]))}" for name in order]
         return '{\n  "perceptual": {\n' + ",\n".join(lines) + "\n  }\n}"
 
 
