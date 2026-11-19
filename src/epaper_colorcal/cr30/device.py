@@ -28,6 +28,11 @@ TIMEOUT = 3.0
 MEASURE_TIMEOUT = 6.0
 CALIBRATE_TIMEOUT = 13.0
 
+SILENT_HINT = (
+    "Is the CR30 switched on and in range? It turns itself off when idle or when its battery runs low: "
+    "press its button (and plug in USB to charge), then try again."
+)
+
 
 class CR30(Instrument):
     """A CHNSpec CR30. Use as ``async with`` or call :meth:`connect`/:meth:`close`."""
@@ -122,7 +127,7 @@ class UsbCR30(CR30):
         try:
             reply = await asyncio.wait_for(self._reader.readexactly(f.USB_FRAME_LEN), timeout or TIMEOUT)
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"CR30 did not answer 0x{cmd:02x} on {self._port}") from exc
+            raise TimeoutError(f"The CR30 did not answer (command 0x{cmd:02x}) on {self._port}. {SILENT_HINT}") from exc
         return f.check_reply(reply, cmd, length=f.USB_FRAME_LEN)
 
 
@@ -182,7 +187,7 @@ class BleCR30(CR30):
         try:
             reply = await asyncio.wait_for(self._reply, timeout or TIMEOUT)
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"CR30 did not answer 0x{op:02x} over BLE (got {len(self._buffer)} bytes)") from exc
+            raise TimeoutError(f"The CR30 did not answer (command 0x{op:02x}) over Bluetooth. {SILENT_HINT}") from exc
         return f.check_reply(reply, op, length=length)
 
 

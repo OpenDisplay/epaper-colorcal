@@ -113,20 +113,27 @@ class OEPLDisplay(Display):  # pylint: disable=too-many-instance-attributes  # s
     async def show(self, index: int, ink: Ink) -> None:
         if self._client is None:
             raise RuntimeError("connect() must be called before show()")
-        from oepl import LUT  # pylint: disable=import-outside-toplevel,import-error
+        from oepl import LUT, OEPLTimeoutError  # pylint: disable=import-outside-toplevel,import-error
         from PIL import Image  # pylint: disable=import-outside-toplevel
 
         image = Image.new("RGB", (self._tag_type.width, self._tag_type.height), ink.rgb)
         # dither=0: the AP maps each pixel to the nearest colour of the tag, so the solid nominal
         # colour stays one ink. wait=True returns once the tag has received the image.
-        await self._client.tag(self._mac).upload_image(
-            image,
-            fit="cover",
-            dither=0,
-            lut=LUT[LUTS[self._lut]],
-            wait=True,
-            wait_timeout=self._wait_timeout,
-        )
+        try:
+            await self._client.tag(self._mac).upload_image(
+                image,
+                fit="cover",
+                dither=0,
+                lut=LUT[LUTS[self._lut]],
+                wait=True,
+                wait_timeout=self._wait_timeout,
+            )
+        except OEPLTimeoutError as exc:
+            raise TimeoutError(
+                f"The tag {self._mac} did not finish showing {ink.name} within {self._wait_timeout:g} s. "
+                "Is it checking in, and is something else (e.g. Home Assistant) sending it images at the "
+                "same time? --oepl-timeout raises the limit."
+            ) from exc
         await asyncio.sleep(self._settle)
 
     async def close(self) -> None:

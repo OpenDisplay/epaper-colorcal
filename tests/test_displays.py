@@ -453,3 +453,57 @@ async def test_the_loop_waits_for_a_display_that_does_not_settle_itself(fast_set
     colors = await measure_all(get_scheme("MONO"), _Unsettled(), instrument, count=2)
     assert all(c.spds[0][0] < 31 for c in colors)  # no flash read was counted
     assert "settled after" in capsys.readouterr().err
+
+
+# ── failing mid-run ─────────────────────────────────────────────────────────
+
+
+class _DropsOut(Instrument):
+    """An instrument that answers once, then goes silent (e.g. a CR30 that switched itself off)."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+        self.closed = False
+
+    async def measure(self) -> Spectrum:
+        self.reads += 1
+        if self.reads > 1:
+            raise TimeoutError("The CR30 did not answer (command 0x02) over Bluetooth. Is the CR30 switched on?")
+        return Spectrum.cr30([50.0] * 31)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _ClosingSim(SimDisplay):
+    closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_a_timeout_mid_run_is_one_line_and_still_cleans_up(monkeypatch, capsys) -> None:
+    display, instrument = _ClosingSim(), _DropsOut()
+    monkeypatch.setattr("epaper_colorcal.measure_palette._display", lambda args: display)
+    monkeypatch.setattr("epaper_colorcal.measure_palette._instrument", lambda args, d: instrument)
+
+    assert main(["--scheme", "MONO", "--id", "S", "--temp", "20", "--dry-run"]) == 1
+
+    err = capsys.readouterr().err
+    assert "error: The CR30 did not answer" in err and "Traceback" not in err
+    assert display.closed and instrument.closed  # e.g. an OEPL tag gets its settings back
+
+
+async def test_oepl_tag_that_never_finishes_is_explained(fake_oepl) -> None:
+    from oepl import OEPLTimeoutError
+
+    clients = fake_oepl()
+    display = OEPLDisplay("ap.local", "AA", wait_timeout=7)
+    await display.connect()
+
+    async def times_out(image, **kwargs):
+        raise OEPLTimeoutError("Timed out after 7s")
+
+    clients[-1].tag = lambda mac: type("H", (), {"upload_image": staticmethod(times_out)})()
+    with pytest.raises(TimeoutError, match="did not finish showing red within 7 s.*Home Assistant"):
+        await display.show(2, Ink("red", "#ff0000"))

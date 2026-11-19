@@ -66,7 +66,10 @@ async def wait_until_settled(instrument: Instrument) -> int:
         if len(window) == SETTLE_READS and max(math.dist(a, b) for a in window for b in window) <= SETTLE_TOLERANCE:
             return reads
         if loop.time() > deadline:
-            raise TimeoutError(f"the panel did not settle within {SETTLE_TIMEOUT:g} s")
+            raise TimeoutError(
+                f"The panel did not settle within {SETTLE_TIMEOUT:g} s: the colour kept changing. "
+                "Is the CR30 seated flat and still?"
+            )
         await asyncio.sleep(SETTLE_INTERVAL)
 
 

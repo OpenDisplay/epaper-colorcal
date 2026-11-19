@@ -66,12 +66,7 @@ def _instrument(args: argparse.Namespace, display: Display) -> Instrument:
 
 async def _connect_instrument(args: argparse.Namespace, instrument: Instrument) -> None:
     """Connect the instrument, optionally calibrating it."""
-    try:
-        await instrument.connect()
-    except TimeoutError as exc:
-        raise SystemExit(
-            f"{exc}. Is the CR30 switched on? It turns itself off when idle: press its button, then try again."
-        ) from exc
+    await instrument.connect()
     if args.dry_run:
         return
     via = f"USB {args.port}" if args.port else "BLE"
@@ -209,7 +204,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    scheme, colors, instrument = asyncio.run(_measure(args, requested))
+    try:
+        scheme, colors, instrument = asyncio.run(_measure(args, requested))
+    except TimeoutError as exc:  # the display's and instrument's cleanup has already run
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     serial = args.serial or instrument.serial_number
 
     if args.temp is None:
