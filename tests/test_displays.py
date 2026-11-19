@@ -1,0 +1,294 @@
+"""Displays and the measurement loop (no hardware: simulated, fake and scripted displays)."""
+
+from __future__ import annotations
+
+import json
+import sys
+
+import pytest
+
+from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OpenDisplayDisplay, SimDisplay
+from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
+from epaper_colorcal.measure import measure_all, synthetic_source
+from epaper_colorcal.measure_palette import _resolve_scheme, main
+from epaper_colorcal.schemes import Ink, get_scheme, parse_inks
+
+# ── the loop ────────────────────────────────────────────────────────────────
+
+
+async def test_measure_all_shows_every_ink_in_order_and_reads_each_count_times() -> None:
+    scheme = get_scheme("BWGBRY")
+    display = SimDisplay()
+    shown: list[tuple[int, str]] = []
+    orig = display.show
+
+    async def spy(index: int, ink: Ink) -> None:
+        shown.append((index, ink.name))
+        await orig(index, ink)
+
+    display.show = spy  # type: ignore[method-assign]
+    colors = await measure_all(scheme, display, synthetic_source(), count=2)
+
+    assert shown == list(enumerate(scheme.colors))
+    assert [c.name for c in colors] == list(scheme.colors)
+    assert all(len(c.spds) == 2 and c.spds[0] != c.spds[1] for c in colors)
+
+
+def test_cli_dry_run_simulates_the_panel(tmp_path, capsys) -> None:
+    out = tmp_path / "spectra.json"
+    rc = main(["--scheme", "BWGBRY", "--id", "S", "--temp", "24", "--dry-run", "--interactive", "--out", str(out)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["source"].endswith("panel at 24°C")
+    assert "[sim] would show ink 3 (red, #ff0000)" in captured.err
+    assert json.loads(out.read_text())["inks"][3] == {"name": "red", "nominal": "#ff0000"}
+
+
+def test_cli_dry_run_with_custom_inks(capsys) -> None:
+    assert main(["--inks", "black,white,orange=#ff8000", "--id", "S", "--temp", "20", "--dry-run"]) == 0
+    entries = json.loads(capsys.readouterr().out)["entries"]
+    assert [(e["name"], e["nominal"]) for e in entries] == [
+        ("black", "#000000"),
+        ("white", "#ffffff"),
+        ("orange", "#ff8000"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--id", "S"], "--port or --cr30-ble"),
+        (["--id", "S", "--dry-run", "--inks", "black,white,teal"], "teal=#rrggbb"),
+        (["--id", "S", "--port", "/dev/x", "--address", "OD1", "--show-command", "true"], "pick one"),
+    ],
+)
+def test_cli_rejects_bad_arguments(capsys, argv: list[str], message: str) -> None:
+    assert main(argv) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_cli_dry_run_without_inks_asks_for_them() -> None:
+    with pytest.raises(SystemExit, match="--scheme or --inks"):
+        main(["--id", "S", "--dry-run"])
+
+
+# ── choosing the inks ───────────────────────────────────────────────────────
+
+
+def test_the_display_s_scheme_is_used_when_none_is_asked_for(capsys) -> None:
+    assert _resolve_scheme(None, get_scheme("BWRY")) == get_scheme("BWRY")
+    assert "Panel reports BWRY" in capsys.readouterr().err
+
+
+def test_a_preset_must_match_the_panel_but_custom_inks_need_not() -> None:
+    with pytest.raises(SystemExit, match="panel reports BWR"):
+        _resolve_scheme(get_scheme("BWGBRY"), get_scheme("BWR"))
+    custom = parse_inks("black,white,red")
+    assert _resolve_scheme(custom, get_scheme("BWGBRY")) is custom
+
+
+# ── command display ─────────────────────────────────────────────────────────
+
+
+async def test_command_display_runs_the_template_per_ink(tmp_path) -> None:
+    log = tmp_path / "shown.txt"
+    display = CommandDisplay(f"echo {{index}} {{name}} {{hex}} {{r}},{{g}},{{b}} >> {log}")
+    await display.show(4, Ink("blue", "#0000ff"))
+    await display.show(6, Ink("orange", "#ff8000"))
+    assert log.read_text().splitlines() == ["4 blue 0000ff 0,0,255", "6 orange ff8000 255,128,0"]
+
+
+async def test_command_display_output_goes_to_stderr_not_stdout(capsys) -> None:
+    await CommandDisplay("echo hello-from-command").show(0, Ink("black", "#000000"))
+    captured = capsys.readouterr()
+    assert "hello-from-command" in captured.err and "hello" not in captured.out
+
+
+async def test_command_display_stops_on_failure() -> None:
+    with pytest.raises(RuntimeError, match="exit 3"):
+        await CommandDisplay("exit 3").show(1, Ink("white", "#ffffff"))
+
+
+def test_command_display_rejects_unknown_fields_up_front() -> None:
+    with pytest.raises(ValueError, match="fields are"):
+        CommandDisplay("show {colour}")
+
+
+# ── manual display ──────────────────────────────────────────────────────────
+
+
+async def test_manual_display_prompts_for_each_ink(monkeypatch) -> None:
+    prompts: list[str] = []
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+    await ManualDisplay().show(3, Ink("red", "#ff0000"))
+    assert "RED (#ff0000" in prompts[0]
+    assert ManualDisplay.automatic is False
+
+
+# ── OpenDisplay ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("scheme_name", "panel_ic_type"), [("BWGBRY", 35), ("BWRY", 55)])
+def test_solid_ink_images_select_their_ink_on_a_measured_palette(scheme_name: str, panel_ic_type: int) -> None:
+    # The panel must show the pure ink being measured, not whatever the palette under
+    # measurement maps the image to; otherwise the measurement is circular.
+    pytest.importorskip("opendisplay")
+    from epaper_dithering import DitherMode, DitherOptions, dither_image
+    from opendisplay.display_palettes import get_palette_for_display
+    from opendisplay.models.enums import ColorScheme
+
+    scheme = get_scheme(scheme_name)
+    palette = get_palette_for_display(panel_ic_type, ColorScheme[scheme_name], True)
+    for ink in scheme.inks:
+        out = dither_image(solid_image(ink, (8, 8)), palette, DitherOptions(mode=DitherMode.NONE))
+        assert set(out.get_flattened_data()) == {palette.index_of(ink.name)}, ink.name
+
+
+class _FakeDevice:
+    """Stands in for opendisplay.OpenDisplayDevice; records how it was used."""
+
+    instances: list[_FakeDevice] = []
+    firmware_scheme = 4  # BWGBRY
+    connect_failures = 0  # how many connects fail before one succeeds
+
+    def __init__(self, mac_address: str | None = None, device_name: str | None = None) -> None:
+        self.mac_address = mac_address
+        self.device_name = device_name
+        self.width, self.height = 40, 24
+        self.config = None
+        self.color_scheme = self.firmware_scheme
+        self.uploaded: list[object] = []
+        self.closed = False
+        _FakeDevice.instances.append(self)
+
+    async def __aenter__(self) -> _FakeDevice:
+        if _FakeDevice.connect_failures:
+            _FakeDevice.connect_failures -= 1
+            from opendisplay.exceptions import BLEConnectionError
+
+            raise BLEConnectionError("Device not found during scan")
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+    async def authenticate(self, key: bytes) -> None:  # pragma: no cover - not exercised
+        pass
+
+    async def interrogate(self) -> None:
+        pass
+
+    async def upload_prepared_image(self, prepared: object) -> None:
+        self.uploaded.append(prepared)
+
+
+@pytest.fixture
+def fake_opendisplay(monkeypatch):
+    opendisplay = pytest.importorskip("opendisplay")
+    _FakeDevice.instances = []
+    _FakeDevice.firmware_scheme = 4
+    _FakeDevice.connect_failures = 0
+    monkeypatch.setattr(opendisplay, "OpenDisplayDevice", _FakeDevice)
+    return opendisplay
+
+
+@pytest.mark.parametrize(
+    ("address", "kwarg"),
+    [
+        ("AA:BB:CC:DD:EE:FF", "mac_address"),
+        ("B8B54E7F-4175-8E2A-CEC4-EFC8F3115EE5", "mac_address"),
+        ("OD216205", "device_name"),
+    ],
+)
+async def test_connect_accepts_mac_uuid_or_name(fake_opendisplay, address: str, kwarg: str) -> None:
+    display = OpenDisplayDisplay(address)
+    await display.connect()
+    assert getattr(_FakeDevice.instances[0], kwarg) == address
+    await display.close()
+    assert _FakeDevice.instances[0].closed
+
+
+async def test_connect_retries_a_board_that_was_asleep(fake_opendisplay) -> None:
+    _FakeDevice.connect_failures = 1
+    display = OpenDisplayDisplay("OD216205")
+    await display.connect()
+    assert len(_FakeDevice.instances) == 2
+
+
+async def test_connect_explains_a_board_that_cannot_be_found(fake_opendisplay) -> None:
+    _FakeDevice.connect_failures = 2
+    with pytest.raises(SystemExit, match="asleep"):
+        await OpenDisplayDisplay("OD216205").connect()
+
+
+@pytest.mark.parametrize(("firmware_scheme", "expected"), [(4, "BWGBRY"), (3, "BWRY"), (7, "SEVEN_COLOR"), (99, None)])
+async def test_the_board_reports_its_scheme(fake_opendisplay, firmware_scheme: int, expected: str | None) -> None:
+    _FakeDevice.firmware_scheme = firmware_scheme
+    display = OpenDisplayDisplay("OD216205")
+    await display.connect()
+    scheme = await display.scheme()
+    assert (scheme.name if scheme else None) == expected
+
+
+async def test_show_uploads_a_full_screen_single_ink(fake_opendisplay, monkeypatch) -> None:
+    seen: list[object] = []
+
+    def fake_prepare(image, **_kwargs):
+        seen.append(image)
+        return b"", None, image
+
+    monkeypatch.setattr(fake_opendisplay, "prepare_image", fake_prepare)
+    display = OpenDisplayDisplay("OD216205", settle_seconds=0)
+    await display.connect()
+    await display.show(3, Ink("red", "#ff0000"))
+
+    assert len(_FakeDevice.instances[0].uploaded) == 1
+    assert seen[0].size == (40, 24)
+    assert seen[0].getcolors() == [(40 * 24, (255, 0, 0))]
+
+
+async def test_show_refuses_an_image_that_is_not_one_ink(fake_opendisplay, monkeypatch) -> None:
+    from PIL import Image
+
+    def two_inks(image, **_kwargs):
+        mixed = image.copy()
+        mixed.paste(Image.new("RGB", (1, 1), (0, 0, 0)), (0, 0))
+        return b"", None, mixed
+
+    monkeypatch.setattr(fake_opendisplay, "prepare_image", two_inks)
+    display = OpenDisplayDisplay("OD216205", settle_seconds=0)
+    await display.connect()
+    with pytest.raises(RuntimeError, match="single ink"):
+        await display.show(3, Ink("red", "#ff0000"))
+    assert not _FakeDevice.instances[0].uploaded
+
+
+@pytest.mark.parametrize(
+    ("address", "advertised", "expected"),
+    [
+        ("OD216205", 18.5, 18.5),
+        ("b8b54e7f-4175-8e2a-cec4-efc8f3115ee5", 21.0, 21.0),  # by address, any case
+        ("OD216205", -40.0, None),  # "no reading"
+        ("OD999999", 18.5, None),  # not seen
+    ],
+)
+async def test_read_board_temperature(monkeypatch, address: str, advertised: float, expected: float | None) -> None:
+    discovery = pytest.importorskip("opendisplay.discovery")
+    adv = type("Adv", (), {"temperature_c": advertised})()
+
+    async def fake_discover(timeout: float) -> dict[str, tuple[str, object]]:
+        return {"OD216205": ("B8B54E7F-4175-8E2A-CEC4-EFC8F3115EE5", adv), "OD1F9C04": ("A41A", None)}
+
+    monkeypatch.setattr(discovery, "discover_devices_with_adv", fake_discover)
+    assert await read_board_temperature(address) == expected
+
+
+def test_displays_import_without_optional_packages() -> None:
+    # Choosing a display must not import py-opendisplay or bleak until they're used.
+    import subprocess
+
+    code = (
+        "import sys, epaper_colorcal.displays, epaper_colorcal.measure_palette; "
+        "assert not {'opendisplay', 'bleak'} & set(sys.modules), sorted(sys.modules)"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
