@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.1.0...v0.2.0) (2026-11-19)
+
+
+### Features
+
+* default the panel temperature to the board's advertised chip temperature ([5c48aad](https://github.com/OpenDisplay/epaper-colorcal/commit/5c48aadb8359dc06b19926734b4e62dca8f96851))
+* own CR30 client for USB and Bluetooth, replacing the vendored code ([06de35a](https://github.com/OpenDisplay/epaper-colorcal/commit/06de35a48a6c3cecca7bb4f923cec4b58e13e464))
+* validate interactive mode on a real Spectra 6 panel ([2cb35b0](https://github.com/OpenDisplay/epaper-colorcal/commit/2cb35b0d7332671246f8796f9f94ec970c4a5969))
+
+
+### Bug Fixes
+
+* treat CR30 reflectance as percent and read the full serial number ([ae58a43](https://github.com/OpenDisplay/epaper-colorcal/commit/ae58a43915ee45937dd6008bae4b5f569dad8bd4))
+
+
+### Documentation
+
+* describe palette files instead of the Rust paste ([ef5def8](https://github.com/OpenDisplay/epaper-colorcal/commit/ef5def8bbe9a95646ee0fa39b6445cf24938201f))
+* record CR30 and Spectra 6 hardware validation results ([e6e06e4](https://github.com/OpenDisplay/epaper-colorcal/commit/e6e06e4b6404892002132f682794b2ba33388a36))
+* rewrite the README and document the verified CR30 protocol ([a6ba054](https://github.com/OpenDisplay/epaper-colorcal/commit/a6ba0544c28ff1246c884254adbc2c119402989c))
+* run the tool with uvx, and document the automatic temperature ([f164a64](https://github.com/OpenDisplay/epaper-colorcal/commit/f164a643d26cef272a11560ed51db47d6da800f6))
+
 ## 0.1.0 (2026-11-12)
 
 
