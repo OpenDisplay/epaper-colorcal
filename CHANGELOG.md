@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.3.0...v0.4.0) (2026-11-19)
+
+
+### Features
+
+* a ColorChecker reference, --static for charts, and a compare command ([d785d1d](https://github.com/OpenDisplay/epaper-colorcal/commit/d785d1d34c5160eed2b82b1acf95fae3e80eed0f))
+
+
+### Bug Fixes
+
+* explain timeouts in one line instead of a traceback ([70499fe](https://github.com/OpenDisplay/epaper-colorcal/commit/70499fe105391f5b90118cba8ef84a75963f518a))
+* retry a CR30 Bluetooth command that gets no answer ([f513927](https://github.com/OpenDisplay/epaper-colorcal/commit/f5139271b036d73c4e37affbdd13e4b9b791a3fe))
+* wait for the refresh to start and outlast pauses before measuring ([f323e4a](https://github.com/OpenDisplay/epaper-colorcal/commit/f323e4a7dfaa7f6e4e482934bb843b2ec1ca58c0))
+
 ## [0.3.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.2.0...v0.3.0) (2026-11-19)
 
 
