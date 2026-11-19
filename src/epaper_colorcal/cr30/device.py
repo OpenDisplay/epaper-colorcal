@@ -149,13 +149,7 @@ class BleCR30(CR30):
         await self._client.connect()
         await self._client.start_notify(BLE_CHAR, self._on_notify)
         await asyncio.sleep(BLE_SETTLE)
-        # The first command after connecting is occasionally dropped (seen once on hardware);
-        # the vendor app retries too. Retry the harmless device-info query once.
-        try:
-            reply = await self._command(f.CMD_DEVICE_INFO, (1, 0, 0, 0, 0, 0), 200)
-        except TimeoutError:
-            reply = await self._command(f.CMD_DEVICE_INFO, (1, 0, 0, 0, 0, 0), 200)
-        self.info = f.info_from_ble(reply)
+        self.info = f.info_from_ble(await self._command(f.CMD_DEVICE_INFO, (1, 0, 0, 0, 0, 0), 200))
 
     async def close(self) -> None:
         if self._client is not None:
@@ -176,6 +170,19 @@ class BleCR30(CR30):
             self._reply.set_result(bytes(self._buffer))
 
     async def _command(self, op: int, params: tuple[int, ...], length: int, *, timeout: float | None = None) -> bytes:
+        """Send one command and return its reply, retrying once.
+
+        A command is occasionally not answered at all (0 bytes), seen on hardware right after
+        connecting and as the first command after a minute without traffic; the module seems to
+        doze and miss the wake byte. A second attempt, with a fresh wake byte, has worked each
+        time. (Repeating a measurement trigger only takes one more scan.)
+        """
+        try:
+            return await self._attempt(op, params, length, timeout=timeout)
+        except TimeoutError:
+            return await self._attempt(op, params, length, timeout=timeout)
+
+    async def _attempt(self, op: int, params: tuple[int, ...], length: int, *, timeout: float | None = None) -> bytes:
         self._buffer = bytearray()
         self._expected = length
         self._reply = asyncio.get_running_loop().create_future()
