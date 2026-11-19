@@ -153,7 +153,7 @@ async def read_patches(
     i = _next_unread(patches, progress, 0)
     while i < len(patches):
         done = sum(p.sample_id in progress.reads for p in patches)
-        prompt = f"[{done + 1}/{len(patches)}] {patches[i].location}: seat the CR30, Enter (r = redo, q = quit) "
+        prompt = f"[{done + 1}/{len(patches)}] {patches[i].location}: seat the instrument, Enter (r = redo, q = quit) "
         answer = (await ask(patches[i], prompt)).strip().lower()
         if answer == "q":
             return False

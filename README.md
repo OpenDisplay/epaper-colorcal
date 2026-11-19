@@ -4,8 +4,8 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
 
-Measure the real colours of an e-paper display, or of a print, with a **CHNSpec CR30**
-spectrocolorimeter (about €55).
+Measure the real colours of an e-paper display, or of a print, with a spectrophotometer.
+Today that's the **CHNSpec CR30** (about €55); other instruments can be added as adapters.
 
 - **E-paper palettes:** the tool shows each ink on the panel, waits for the refresh, reads its
   spectrum and writes the palette, for any panel: OpenDisplay boards, OpenEPaperLink tags (through
@@ -17,7 +17,7 @@ spectrocolorimeter (about €55).
   ArgyllCMS.
 
 ```bash
-# Any panel, by hand: show each ink, seat the CR30, press Enter
+# Any panel, by hand: show each ink, seat the instrument, press Enter
 uvx --from 'epaper-colorcal[ble]' epaper-colorcal --scheme BWR --id my_panel --temp 21 --cr30-ble > my_panel.json
 
 # Automatic, everything wireless: an OpenDisplay board, or an OpenEPaperLink tag over ATC BLE
@@ -35,11 +35,11 @@ ideal colours (`#ff0000` for a red that is really a dull brick red), hand estima
 `perceptual` colours in OpenEPaperLink's tag types), or photos of the panel, which vary with the
 camera, the lighting and the RAW processing.
 
-The CR30 lights the sample itself at 45° and reads the reflected spectrum in 31 bands from 400
-to 700 nm. Room light doesn't matter, and the result is the panel's physical reflectance, from
-which any colour space can be computed. On our unit, the colour computed from its spectrum
-matches the CR30's own display to **ΔE 0.05**, and repeated reads of a panel agree to about
-**ΔE 0.1**.
+A reflective spectrophotometer lights the sample itself, at a fixed angle, and reads the
+reflected spectrum. Room light doesn't matter, and the result is the panel's physical
+reflectance, from which any colour space can be computed. Even a cheap one does well: the CR30
+(45°/0°, 31 bands from 400 to 700 nm) matches its own display to **ΔE 0.05** with our colour
+maths, and repeated reads of a panel agree to about **ΔE 0.1**.
 
 ## Supported hardware
 
@@ -48,6 +48,9 @@ matches the CR30's own display to **ΔE 0.05**, and repeated reads of a panel ag
 | Instrument | Connection | Status |
 |---|---|---|
 | CHNSpec CR30 | USB (`--port`), Bluetooth (`--cr30-ble`) | verified (software V11.3.0.0.20231219) |
+
+Other instruments, such as an X-Rite i1Pro, fit the same interface: see
+[`docs/adapters.md`](docs/adapters.md).
 
 **Showing the inks on the panel**
 
@@ -81,14 +84,19 @@ a throwaway environment. Name the extras you need:
 ```bash
 uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal --help   # OpenDisplay, all wireless
 uvx --from 'epaper-colorcal[ble,atc]' epaper-colorcal --help                         # ATC BLE tags
-uvx --from 'epaper-colorcal[serial]' epaper-colorcal --help                          # by hand, CR30 on USB
+uvx --from 'epaper-colorcal[serial]' epaper-colorcal --help                          # by hand, the CR30 on USB
 ```
 
 To install it: `uv tool install --python 3.13 'epaper-colorcal[ble,opendisplay]'` (or `pip
 install`). The examples below write `epaper-colorcal`; put `uvx --from '…' epaper-colorcal` in
 its place if you use uvx.
 
-## Connecting the CR30
+## Instruments
+
+Every workflow below works the same with any supported instrument; only how you connect it
+differs.
+
+### CHNSpec CR30
 
 - **Bluetooth:** switch it on and pass `--cr30-ble`. It's found by scanning, or give its name
   (shown on its screen, e.g. `--cr30-ble CM454M1246`).
@@ -103,7 +111,7 @@ sessions, plug in USB to charge it.
 
 ## Measuring a panel
 
-Seat the CR30 flat on the panel, away from the edges. For each ink the tool shows it, waits for
+Seat the instrument flat on the panel, away from the edges. For each ink the tool shows it, waits for
 the panel to settle, then takes `--count` reads (default 3) and averages them.
 
 **Settling.** OpenDisplay boards report when a refresh has finished. For every other display
@@ -170,7 +178,7 @@ The command's output goes to stderr; a non-zero exit stops the run.
 ### By hand
 
 Without any of that, the tool asks for each ink in turn: fill the screen with the ink's nominal
-colour, **undithered**, seat the CR30, press Enter.
+colour, **undithered**, seat the instrument, press Enter.
 
 ```bash
 epaper-colorcal --scheme BWRY --id my_panel --temp 21 --port /dev/ttyUSB0 > my_panel.json
@@ -245,8 +253,9 @@ datasheet comparison), so a measurement can be re-processed later without measur
 
 ## Checking the instrument
 
-A ColorChecker Classic has published reference values, so measuring one shows how close the
-CR30 reads. `--static` reads each patch as soon as you press Enter (nothing to wait for on
+A ColorChecker Classic has published reference values, so measuring one shows how close your
+instrument reads, and comparing two instruments' readings of the same chart shows how they
+differ. `--static` reads each patch as soon as you press Enter (nothing to wait for on
 paper):
 
 ```bash
@@ -263,7 +272,7 @@ e.g. exported from another instrument.
 
 ## Profiling a printer
 
-With [ArgyllCMS](https://www.argyllcms.com/) (`brew install argyll-cms`) the CR30 builds ICC
+With [ArgyllCMS](https://www.argyllcms.com/) (`brew install argyll-cms`) the tool builds ICC
 profiles for a printer and paper:
 
 ```bash
@@ -275,15 +284,16 @@ colprof -v -D "Printer X, paper Y" mychart                                  # ->
 ```
 
 - `chart` asks for each patch in printed order (strip A top to bottom, then B, …): seat the
-  CR30, press Enter. `r` redoes the previous patch, `q` saves and quits. Progress is saved after
+  instrument, press Enter. `r` redoes the previous patch, `q` saves and quits. Progress is saved after
   every patch, so running the same command again continues where you stopped. 250 patches take
   about half an hour.
-- printtarg doesn't know the CR30; `-i i1` lays the chart out for a similar spot instrument, with
-  patches large enough for the CR30's 4 mm aperture.
+- printtarg's `-i` chooses the patch layout for the instrument; for the CR30, which printtarg
+  doesn't know, `-i i1` gives patches large enough for its 4 mm aperture.
 - The `.ti3` holds each patch's spectrum, so `colprof` can build the profile for other viewing
   light too (e.g. `-i A` for tungsten).
-- Paper with optical brighteners fluoresces and the CR30's UV output is unknown: start with
-  unbrightened paper, and check the CR30 against a ColorChecker first.
+- Paper with optical brighteners fluoresces, so results depend on the instrument's UV light
+  (unknown for the CR30): start with unbrightened paper, and check the instrument against a
+  ColorChecker first.
 - `chart --dry-run` synthesises readings from an RGB chart, to try the pipeline without hardware.
 
 ## Command reference
@@ -298,8 +308,8 @@ colprof -v -D "Printer X, paper Y" mychart                                  # ->
 | `--temp` | panel temperature in °C (default: what the display reports) |
 | `--note` | free text at the start of the palette's `source`, e.g. the panel model |
 | `--count` | reads averaged per ink (default 3) |
-| `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
-| `--calibrate` | explicit black/white calibration first (USB) |
+| `--port` / `--cr30-ble [NAME]` | instrument: the CR30 over USB / Bluetooth |
+| `--calibrate` | explicit black/white calibration first (CR30 over USB) |
 | `--address`, `--key` | show the inks on an OpenDisplay board |
 | `--oepl-ap`, `--oepl-tag`, `--oepl-lut`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag through its access point |
 | `--atc` | show the inks on a tag with ATC BLE firmware |
@@ -321,8 +331,9 @@ instrument ─► reflectance spectrum (%, its own wavelengths) ─► colour-sc
 The measurement loop (`measure.py`) joins three kinds of adapter:
 
 - **instruments** (`epaper_colorcal.instruments`) return a reflectance `Spectrum` on their own
-  wavelength grid: the CR30 over USB or Bluetooth (`epaper_colorcal.cr30`, protocol in
-  [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a synthetic one for dry runs;
+  wavelength grid, so any range and step works: the CR30 over USB or Bluetooth
+  (`epaper_colorcal.cr30`, protocol in [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a
+  synthetic one for dry runs;
 - **displays** (`epaper_colorcal.displays`) show one ink at a time and may report the panel's
   inks and temperature: OpenDisplay, OpenEPaperLink (access point or ATC BLE), command, manual
   and simulated;

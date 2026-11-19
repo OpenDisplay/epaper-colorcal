@@ -79,7 +79,7 @@ async def wait_until_settled(instrument: Instrument, before: tuple[float, float,
             reason = "kept changing" if started else "never changed from the previous colour"
             raise TimeoutError(
                 f"The panel did not settle within {SETTLE_TIMEOUT:g} s: its colour {reason}. "
-                "Is the CR30 seated flat and still, and did the panel refresh?"
+                "Is the instrument seated flat and still, and did the panel refresh?"
             )
         await asyncio.sleep(SETTLE_INTERVAL)
 

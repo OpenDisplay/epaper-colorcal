@@ -13,7 +13,7 @@ class Display(ABC):
     """Shows one ink at a time, solid, on the panel being measured."""
 
     automatic = True
-    """False if a person shows each ink (then nobody needs to be told to seat the CR30 first)."""
+    """False if a person shows each ink (then nobody needs to be told to seat the instrument first)."""
 
     settled_after_show = False
     """True if :meth:`show` returns only once the panel has finished refreshing. Otherwise the
