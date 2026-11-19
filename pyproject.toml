@@ -39,6 +39,10 @@ serial = [
 ble = [
     "bleak>=0.22",
 ]
+# Showing the inks on a tag with ATC BLE OEPL firmware, directly over Bluetooth (--atc).
+atc = [
+    "py-atc-ble-oepl>=1.0",
+]
 # Showing the inks on an OpenEPaperLink tag through its access point (--oepl-ap).
 oepl = [
     "py-oepl>=1.0; python_version >= '3.12'",
@@ -77,7 +81,7 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 # colour-science has no stubs; opendisplay/epaper_dithering/PIL are only present with the
 # optional `opendisplay` extra (interactive mode), so don't require them for type-checking.
-module = ["colour.*", "opendisplay.*", "epaper_dithering.*", "PIL.*", "serial_asyncio.*", "bleak.*", "oepl.*"]
+module = ["colour.*", "opendisplay.*", "epaper_dithering.*", "PIL.*", "serial_asyncio.*", "bleak.*", "oepl.*", "py_atc_ble_oepl.*"]
 ignore_missing_imports = true
 
 [tool.pylint.format]

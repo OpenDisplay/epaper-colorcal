@@ -40,13 +40,15 @@ def build_colors(scheme: Scheme, provider: Callable[[str], list[list[float]]]) -
 
 
 def _display(args: argparse.Namespace) -> Display:
-    from .displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
+    from .displays import ATCDisplay, CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
 
     if args.dry_run:
         return SimDisplay()
     if args.address:
         key = bytes.fromhex(args.key) if args.key else None
         return OpenDisplayDisplay(args.address, key=key, settle_seconds=args.settle)
+    if args.atc:
+        return ATCDisplay(args.atc, settle_seconds=args.settle)
     if args.oepl_ap:
         return OEPLDisplay(
             args.oepl_ap, args.oepl_tag, lut=args.oepl_lut, wait_timeout=args.oepl_timeout, settle_seconds=args.settle
@@ -171,6 +173,9 @@ def build_parser() -> argparse.ArgumentParser:
     show = p.add_argument_group("showing the inks (default: you show each one and press Enter)")
     show.add_argument("--address", help="Drive this OpenDisplay board over Bluetooth (name, MAC or macOS UUID)")
     show.add_argument("--key", help="The OpenDisplay board's encryption key as hex, if it has one")
+    show.add_argument(
+        "--atc", metavar="NAME", help="Show the inks on a tag with ATC BLE OEPL firmware, e.g. ATC_05D611"
+    )
     show.add_argument("--oepl-ap", metavar="HOST", help="Show the inks on an OpenEPaperLink tag through this AP")
     show.add_argument("--oepl-tag", metavar="MAC", help="The OpenEPaperLink tag's MAC (with --oepl-ap)")
     show.add_argument(
@@ -205,12 +210,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _check_args(args: argparse.Namespace) -> str | None:
     """What's wrong with the arguments, if anything."""
-    if sum(bool(x) for x in (args.address, args.oepl_ap, args.show_command)) > 1:
-        return "--address, --oepl-ap and --show-command all show the inks; pick one"
+    if sum(bool(x) for x in (args.address, args.atc, args.oepl_ap, args.show_command)) > 1:
+        return "--address, --atc, --oepl-ap and --show-command all show the inks; pick one"
     if bool(args.oepl_ap) != bool(args.oepl_tag):
         return "--oepl-ap and --oepl-tag go together"
-    if args.static and (args.address or args.oepl_ap or args.show_command):
-        return "--static is for samples shown by hand, not with --address, --oepl-ap or --show-command"
+    if args.static and (args.address or args.atc or args.oepl_ap or args.show_command):
+        return "--static is for samples shown by hand, not with a display that shows the inks itself"
     if not args.dry_run and not (args.port or args.cr30_ble):
         return "connect the CR30 with --port or --cr30-ble (or use --dry-run)"
     return None
