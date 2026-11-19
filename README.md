@@ -1,14 +1,14 @@
 # epaper-colorcal
 
+[![License](https://img.shields.io/github/license/OpenDisplay/epaper-colorcal?style=flat-square)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
+[![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
+
 Measure the real colours of an e-paper panel with a **CHNSpec CR30** spectrocolorimeter and turn
 them into a palette: an `epaper-palette` file for
 [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering) and py-opendisplay, a
 `perceptual` block for an OpenEPaperLink tag type, or raw spectra for anything else. The same
 instrument also checks itself against a ColorChecker and profiles printers with ArgyllCMS.
-
-[![License](https://img.shields.io/github/license/OpenDisplay/epaper-colorcal?style=flat-square)](LICENSE)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
-[![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
 
 Seat the CR30 on the panel once; the tool shows each ink, waits until the panel has finished
 refreshing, reads its spectrum and prints the palette. With an OpenDisplay board and the CR30
