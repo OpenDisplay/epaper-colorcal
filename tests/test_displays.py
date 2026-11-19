@@ -7,12 +7,13 @@ import sys
 
 import pytest
 
-from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OpenDisplayDisplay, SimDisplay
+from epaper_colorcal.displays import CommandDisplay, ManualDisplay, OEPLDisplay, OpenDisplayDisplay, SimDisplay
 from epaper_colorcal.displays.opendisplay import read_board_temperature, solid_image
-from epaper_colorcal.instruments import SyntheticInstrument
-from epaper_colorcal.measure import measure_all
+from epaper_colorcal.instruments import Instrument, SyntheticInstrument
+from epaper_colorcal.measure import measure_all, wait_until_settled
 from epaper_colorcal.measure_palette import _resolve_scheme, main
 from epaper_colorcal.schemes import Ink, get_scheme, parse_inks
+from epaper_colorcal.spectrum import Spectrum
 
 # ── the loop ────────────────────────────────────────────────────────────────
 
@@ -293,3 +294,162 @@ def test_displays_import_without_optional_packages() -> None:
         "assert not {'opendisplay', 'bleak'} & set(sys.modules), sorted(sys.modules)"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+# ── OpenEPaperLink ──────────────────────────────────────────────────────────
+
+
+class _FakeOEPL:
+    """Stands in for oepl.OEPLClient; one BWRY tag of type 0x2A."""
+
+    def __init__(self, temperature: int = 24, known: bool = True) -> None:
+        self.temperature, self.known = temperature, known
+        self.connected = False
+        self.uploads: list[tuple[object, dict]] = []
+        self.saved: list[dict] = []
+        self.disconnects = 0
+
+    async def connect(self) -> None:
+        self.connected = True
+
+    async def disconnect(self) -> None:
+        self.connected = False
+        self.disconnects += 1
+
+    async def get_tag(self, mac: str):
+        if not self.known:
+            return None
+        fields = {"mac": mac, "hw_type": 0x2A, "temperature": self.temperature, "lut": 0, "content_mode": 25}
+        return type("Tag", (), fields)()
+
+    async def save_tag_config(self, mac: str, **fields) -> None:
+        self.saved.append(fields)
+
+    async def get_tag_type(self, hw_type: int):
+        table = {"white": [255, 255, 255], "black": [0, 0, 0], "red": [255, 0, 0], "yellow": [255, 255, 0]}
+        return type("TagType", (), {"name": 'M3 3.0" BWRY', "width": 400, "height": 168, "color_table": table})()
+
+    def tag(self, mac: str):
+        client = self
+
+        class _Handle:
+            async def upload_image(self, image, **kwargs):
+                client.uploads.append((image, kwargs))
+
+        return _Handle()
+
+
+@pytest.fixture
+def fake_oepl(monkeypatch):
+    pytest.importorskip("oepl")
+    clients: list[_FakeOEPL] = []
+
+    def make(*, temperature: int = 24, known: bool = True):
+        def factory(host: str) -> _FakeOEPL:
+            clients.append(_FakeOEPL(temperature, known))
+            return clients[-1]
+
+        monkeypatch.setattr("epaper_colorcal.displays.oepl._client", factory)
+        return clients
+
+    return make
+
+
+async def test_oepl_reports_the_tag_s_colours_in_its_order(fake_oepl) -> None:
+    fake_oepl()
+    display = OEPLDisplay("ap.local", "00:00:7E:A6:74:21:94:91")
+    await display.connect()
+    scheme = await display.scheme()
+    assert scheme is not None and scheme.name == 'OEPL M3 3.0" BWRY'
+    assert [(i.name, i.nominal) for i in scheme.inks] == [
+        ("white", "#ffffff"),
+        ("black", "#000000"),
+        ("red", "#ff0000"),
+        ("yellow", "#ffff00"),
+    ]
+
+
+async def test_oepl_uploads_a_solid_undithered_image_and_waits_for_the_redraw(fake_oepl) -> None:
+    clients = fake_oepl()
+    display = OEPLDisplay("ap.local", "00007ea674219491", wait_timeout=120)
+    await display.connect()
+    await display.show(3, Ink("yellow", "#ffff00"))
+    image, kwargs = clients[-1].uploads[0]
+    assert image.size == (400, 168) and image.getcolors() == [(400 * 168, (255, 255, 0))]
+    from oepl import LUT
+
+    assert kwargs == {"fit": "cover", "dither": 0, "lut": LUT.NO_REPEAT, "wait": True, "wait_timeout": 120}
+    await display.close()
+    assert not clients[-1].connected
+    # the LUT and content mode the uploads changed are put back
+    assert clients[-1].saved == [{"lut": 0, "content_mode": 25}]
+
+
+def test_oepl_rejects_an_unknown_lut() -> None:
+    with pytest.raises(ValueError, match="choose one of"):
+        OEPLDisplay("ap.local", "AA", lut="slow")
+
+
+@pytest.mark.parametrize(("reported", "expected"), [(24, 24.0), (0, None), (-40, None)])
+async def test_oepl_temperature_from_the_tag(fake_oepl, reported: int, expected: float | None) -> None:
+    clients = fake_oepl(temperature=reported)
+    assert await OEPLDisplay("ap.local", "AA").temperature() == expected
+    assert clients[-1].disconnects == 1
+
+
+async def test_oepl_unknown_tag_is_explained(fake_oepl) -> None:
+    clients = fake_oepl(known=False)
+    with pytest.raises(SystemExit, match="doesn't know a tag"):
+        await OEPLDisplay("ap.local", "AA").connect()
+    assert not clients[-1].connected
+
+
+def test_cli_oepl_needs_both_flags(capsys) -> None:
+    assert main(["--id", "S", "--dry-run", "--oepl-ap", "ap.local"]) == 2
+    assert "go together" in capsys.readouterr().err
+
+
+# ── settling ────────────────────────────────────────────────────────────────
+
+
+class _Refreshing(Instrument):
+    """Reads a panel that flashes for a few reads, then holds a colour (plus tiny noise)."""
+
+    def __init__(self, flashing_reads: int) -> None:
+        self.flashing = flashing_reads
+        self.reads = 0
+
+    async def measure(self) -> Spectrum:
+        self.reads += 1
+        if self.reads <= self.flashing:
+            level = 90.0 if self.reads % 2 else 4.0  # white/black flashes mid-refresh
+        else:
+            level = 30.0 + 0.01 * (self.reads % 3)
+        return Spectrum.cr30([level] * 31)
+
+
+@pytest.fixture
+def fast_settle(monkeypatch):
+    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_INTERVAL", 0)
+
+
+async def test_settling_waits_out_a_refresh(fast_settle) -> None:
+    instrument = _Refreshing(flashing_reads=5)
+    assert await wait_until_settled(instrument) == 5 + 4  # four stable reads after the flashes
+
+
+async def test_settling_gives_up_on_a_panel_that_never_settles(fast_settle, monkeypatch) -> None:
+    monkeypatch.setattr("epaper_colorcal.measure.SETTLE_TIMEOUT", 0)
+    with pytest.raises(TimeoutError, match="did not settle"):
+        await wait_until_settled(_Refreshing(flashing_reads=10**6))
+
+
+class _Unsettled(SimDisplay):
+    settled_after_show = False
+
+
+async def test_the_loop_waits_for_a_display_that_does_not_settle_itself(fast_settle, capsys) -> None:
+    instrument = _Refreshing(flashing_reads=3)
+    colors = await measure_all(get_scheme("MONO"), _Unsettled(), instrument, count=2)
+    assert all(c.spds[0][0] < 31 for c in colors)  # no flash read was counted
+    assert "settled after" in capsys.readouterr().err

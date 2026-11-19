@@ -1,9 +1,10 @@
 # Adding an adapter
 
-epaper-colorcal measures a panel with two kinds of adapter:
+epaper-colorcal has three kinds of adapter:
 
 - an **instrument** reads the reflectance of whatever it sits on (`epaper_colorcal.instruments`);
-- a **display** puts one ink at a time on the panel (`epaper_colorcal.displays`).
+- a **display** puts one ink at a time on the panel (`epaper_colorcal.displays`);
+- an **output** turns the finished measurement into a document (`epaper_colorcal.outputs`).
 
 The loop in `measure.py` shows each ink on the display, reads it `--count` times with the
 instrument and averages. It knows nothing about any particular device, so supporting a new
@@ -50,9 +51,13 @@ What `show()` must guarantee:
   nominal colour maps to the ink itself, never through a measured palette: that would make the
   measurement circular. (The OpenDisplay adapter checks that the image it uploads is a single
   ink.)
-- **It returns once the panel has settled.** E-paper refreshes take seconds and flash on the
-  way. If the device tells you when the refresh is done, wait for that; otherwise wait long
-  enough, and make `--settle` configurable.
+- **Say whether it returns after the refresh.** E-paper refreshes take seconds and flash on the
+  way. If the device tells you when the refresh has finished and `show()` waits for that, set
+  `settled_after_show = True`. Otherwise leave it `False`: the loop then reads until the colour
+  is stable before measuring (`measure.wait_until_settled`).
+- **Use the panel's best refresh.** Fast or partial waveforms show weaker colours. If the device
+  lets you choose, measure with its full refresh, and restore the device's own setting in
+  `close()`, as `OEPLDisplay` does.
 - `index` is the ink's position in the scheme, which for preset schemes is the firmware's
   palette index.
 
@@ -107,6 +112,35 @@ What `measure()` must guarantee:
   `colorimetry.py` for every instrument alike. An instrument that only reports Lab or XYZ doesn't
   fit this port yet.
 
+## An output adapter
+
+Subclass `Output`, give it a `name` (its `--format` value) and implement `render()`, which takes
+the finished `Measurement` and returns the document as text.
+
+```python
+from epaper_colorcal.outputs import Measurement, Output
+
+
+class CsvOutput(Output):
+    name = "csv"
+
+    def render(self, measurement: Measurement) -> str:
+        rows = ["name,L,a,b"]
+        for color in measurement.colors:
+            L, a, b = color.reading.lab_d65          # absolute; or .srgb, .lab_d50, .xyz_d65
+            rows.append(f"{color.name},{L:.2f},{a:.2f},{b:.2f}")
+        return "\n".join(rows)
+```
+
+A `Measurement` holds the scheme (inks in order), each ink's `MeasuredColor` (its `reading` and
+raw `spds` with their `wavelengths`), the instrument, serial, temperature, date and note. For
+colours relative to the panel's white, as most consumers want, build the palette with
+`emit.build_palette()` and use its `preview_rgb()` (sRGB) or entries (Lab), as `OEPLOutput` does.
+Register the adapter in `OUTPUTS` in `outputs.py`.
+
+Outputs that write somewhere other than stdout, e.g. into a device's configuration, should
+require an explicit flag and show what they would change before changing it.
+
 ## Wiring it in
 
 1. **The CLI** (`measure_palette.py`): add a flag in `build_parser()` and pick your adapter in
@@ -136,10 +170,8 @@ Then measure a real panel end to end, and say in the PR which device and panel y
 
 ## Candidates
 
-- **OpenEPaperLink tags** (display): push a solid image to a tag through its access point. Until
-  then, `--show-command` with a short script does it. Tags pick up images when they next check
-  in, so the adapter needs a long or polled wait.
 - **X-Rite i1Pro** (instrument), e.g. through ArgyllCMS (`spotread`) or X-Rite's SDK. Its
   spectral range differs from the CR30's, which the instrument port handles.
-- **OpenDisplay firmware 3.0** (display): read a mode's `0xB0` colour list as its `scheme()`,
-  including multi-pass mixes, once py-opendisplay supports 3.0.
+- **OpenDisplay firmware 3.0** (display and output): read a mode's `0xB0` colour list as its
+  `scheme()`, including multi-pass mixes, and write the measured colours back with the "measured
+  on this unit" flag, once py-opendisplay supports 3.0.

@@ -5,6 +5,7 @@
 * :class:`ManualDisplay`: asks you to show the ink and press Enter (any panel),
 * :class:`CommandDisplay`: runs a command you give (``--show-command``),
 * :class:`OpenDisplayDisplay`: an OpenDisplay board over Bluetooth (``--address``),
+* :class:`OEPLDisplay`: an OpenEPaperLink tag through its access point (``--oepl-ap``),
 * :class:`SimDisplay`: prints what it would show (``--dry-run``).
 
 A display may also know things about the panel: the inks it can show
@@ -14,7 +15,8 @@ A display may also know things about the panel: the inks it can show
 from .base import Display
 from .command import CommandDisplay
 from .manual import ManualDisplay
+from .oepl import OEPLDisplay
 from .opendisplay import OpenDisplayDisplay
 from .sim import SimDisplay
 
-__all__ = ["CommandDisplay", "Display", "ManualDisplay", "OpenDisplayDisplay", "SimDisplay"]
+__all__ = ["CommandDisplay", "Display", "ManualDisplay", "OEPLDisplay", "OpenDisplayDisplay", "SimDisplay"]
