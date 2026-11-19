@@ -54,6 +54,8 @@ def solid_image(ink: Ink, size: tuple[int, int]) -> Image:
 
 
 class OpenDisplayDisplay(Display):
+    settled_after_show = True  # the upload returns after the board reports refresh complete
+
     def __init__(self, address: str, key: bytes | None = None, settle_seconds: float = 3.0) -> None:
         self._address = address  # a MAC (Linux/Windows), a macOS UUID or the advertised name
         self._key = key

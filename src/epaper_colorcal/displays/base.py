@@ -15,6 +15,10 @@ class Display(ABC):
     automatic = True
     """False if a person shows each ink (then nobody needs to be told to seat the CR30 first)."""
 
+    settled_after_show = False
+    """True if :meth:`show` returns only once the panel has finished refreshing. Otherwise the
+    measurement reads until the panel is stable before taking its readings."""
+
     async def temperature(self) -> float | None:
         """The panel's temperature in °C if the display knows it. Called before :meth:`connect`."""
         return None

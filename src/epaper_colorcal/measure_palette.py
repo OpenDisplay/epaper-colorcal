@@ -44,7 +44,9 @@ def _display(args: argparse.Namespace) -> Display:
         key = bytes.fromhex(args.key) if args.key else None
         return OpenDisplayDisplay(args.address, key=key, settle_seconds=args.settle)
     if args.oepl_ap:
-        return OEPLDisplay(args.oepl_ap, args.oepl_tag, wait_timeout=args.oepl_timeout, settle_seconds=args.settle)
+        return OEPLDisplay(
+            args.oepl_ap, args.oepl_tag, lut=args.oepl_lut, wait_timeout=args.oepl_timeout, settle_seconds=args.settle
+        )
     if args.show_command:
         return CommandDisplay(args.show_command, settle_seconds=args.settle)
     return ManualDisplay()
@@ -165,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--key", help="The OpenDisplay board's encryption key as hex, if it has one")
     show.add_argument("--oepl-ap", metavar="HOST", help="Show the inks on an OpenEPaperLink tag through this AP")
     show.add_argument("--oepl-tag", metavar="MAC", help="The OpenEPaperLink tag's MAC (with --oepl-ap)")
+    show.add_argument(
+        "--oepl-lut",
+        choices=["full", "adaptive", "fast-no-reds", "fast"],
+        default="full",
+        help="Refresh waveform for the OpenEPaperLink tag while measuring (default full; restored afterwards)",
+    )
     show.add_argument(
         "--oepl-timeout",
         type=float,

@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class SimDisplay(Display):
+    settled_after_show = True  # nothing to wait for
+
     def __init__(self) -> None:
         self.current: Ink | None = None
         """The ink on the simulated panel, for a :class:`~epaper_colorcal.instruments.SyntheticInstrument`."""
