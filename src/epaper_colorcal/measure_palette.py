@@ -15,11 +15,15 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .colorimetry import average_spds, reading_from_spd
 from .emit import MeasuredColor, render_palette, spectra_sidecar, write_sidecar
 from .schemes import Scheme, get_scheme
 from .synthetic import IDEAL_SRGB, synthetic_spd
+
+if TYPE_CHECKING:
+    from .cr30 import CR30
 
 # Function that, given a color name, returns a list of raw SPD reads for it.
 SpdProvider = Callable[[str], list[list[float]]]
@@ -45,39 +49,42 @@ def _dry_run_provider(count: int) -> SpdProvider:
     return provide
 
 
-def _hardware_provider(
-    port: str, count: int, verbose: bool, calibrate: bool = False
-) -> tuple[SpdProvider, Callable[[], str]]:
+async def _open_cr30(args: argparse.Namespace) -> CR30:
+    """Connect to the CR30 on USB (--port) or BLE (--cr30-ble), optionally calibrating it."""
+    from .cr30 import open_cr30
+
+    cr30 = open_cr30(port=args.port, ble=args.cr30_ble)
+    await cr30.connect()
+    via = f"USB {args.port}" if args.port else "BLE"
+    print(f"Connected to {cr30.model} (s/n {cr30.serial_number}) over {via}.", file=sys.stderr)
+
+    if args.calibrate:
+        input("Close the CR30 cap fully (black calibration), then press Enter… ")
+        if not await cr30.calibrate_black():
+            raise SystemExit("Black calibration failed.")
+        input("Keep the cap closed (white calibration), then press Enter… ")
+        if not await cr30.calibrate_white():
+            raise SystemExit("White calibration failed.")
+    return cr30
+
+
+def _hardware_provider(args: argparse.Namespace) -> tuple[SpdProvider, Callable[[], str]]:
     """Build a provider that prompts the operator and reads the CR30.
 
     Returns the provider plus a callable to fetch the device serial after connect.
-    Importing/handshaking happens on first use so --dry-run never touches serial.
     """
-    from .reader import CR30Reader
-
-    reader = CR30Reader(port=port, verbose=verbose)
     loop = asyncio.new_event_loop()
-
-    loop.run_until_complete(reader.connect())
-    print(f"Connected to {reader.model} (s/n {reader.serial_number}).", file=sys.stderr)
-
-    if calibrate:
-        input("Close the CR30 cap fully (black calibration), then press Enter… ")
-        if not loop.run_until_complete(reader.calibrate_black()):
-            raise SystemExit("Black calibration failed.")
-        input("Keep the cap closed (white calibration), then press Enter… ")
-        if not loop.run_until_complete(reader.calibrate_white()):
-            raise SystemExit("White calibration failed.")
+    cr30 = loop.run_until_complete(_open_cr30(args))
 
     def provide(name: str) -> list[list[float]]:
         input(f"Fill the panel with solid {name.upper()}, seat the CR30 against it, then press Enter… ")
         reads: list[list[float]] = []
-        for i in range(count):
-            reads.append(loop.run_until_complete(reader.read_spd()))
-            print(f"  read {i + 1}/{count} ok", file=sys.stderr)
+        for i in range(args.count):
+            reads.append(loop.run_until_complete(cr30.measure()))
+            print(f"  read {i + 1}/{args.count} ok", file=sys.stderr)
         return reads
 
-    return provide, (lambda: reader.serial_number)
+    return provide, (lambda: cr30.serial_number)
 
 
 async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[list[MeasuredColor], str]:
@@ -96,22 +103,10 @@ async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[li
 
     if not args.address:
         raise SystemExit("--address is required for interactive mode (or add --dry-run)")
-    if not args.port:
-        raise SystemExit("--port (the CR30) is required for interactive mode (or add --dry-run)")
+    if not (args.port or args.cr30_ble):
+        raise SystemExit("--port or --cr30-ble (the CR30) is required for interactive mode (or add --dry-run)")
 
-    from .reader import CR30Reader
-
-    reader = CR30Reader(port=args.port, verbose=args.verbose)
-    await reader.connect()
-    print(f"Connected to {reader.model} (s/n {reader.serial_number}).", file=sys.stderr)
-
-    if args.calibrate:
-        input("Close the CR30 cap fully (black calibration), then press Enter… ")
-        if not await reader.calibrate_black():
-            raise SystemExit("Black calibration failed.")
-        input("Keep the cap closed (white calibration), then press Enter… ")
-        if not await reader.calibrate_white():
-            raise SystemExit("White calibration failed.")
+    cr30 = await _open_cr30(args)
     if sys.stdin.isatty():
         input("Seat the CR30 flat against the panel and press Enter to start the sweep… ")
 
@@ -121,14 +116,14 @@ async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[li
     try:
 
         async def cr30_source(name: str) -> list[float]:
-            return await reader.read_spd()
+            return await cr30.measure()
 
         colors = await measure_interactive(scheme, ble_panel, cr30_source, args.count)
     finally:
         await ble_panel.close()
-        await reader.disconnect()
+        await cr30.close()
 
-    return colors, args.serial or reader.serial_number
+    return colors, args.serial or cr30.serial_number
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,7 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
         dest="palette_id",
         help="Name for this measurement, e.g. spectra6_13in3 (recorded in the sidecar)",
     )
-    p.add_argument("--port", help="Serial port of the CR30 (e.g. /dev/tty.usbserial-XXXX)")
+    cr30 = p.add_mutually_exclusive_group()
+    cr30.add_argument("--port", help="USB serial port of the CR30 (e.g. /dev/tty.wchusbserial120)")
+    cr30.add_argument(
+        "--cr30-ble",
+        nargs="?",
+        const="auto",
+        metavar="NAME",
+        help="Use the CR30 over Bluetooth: its name/address, or no value to find it by scanning",
+    )
     p.add_argument("--count", type=int, default=3, help="SPD reads to average per color (default 3)")
     p.add_argument("--temp", type=float, default=None, help="Panel temperature in °C (strongly recommended)")
     p.add_argument("--note", default="", help="Free-text note, e.g. the panel model, prepended to the palette's source")
@@ -153,7 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--out", default=None, help="Path to write the raw-spectra JSON sidecar")
     p.add_argument("--dry-run", action="store_true", help="Synthesise spectra; no hardware needed")
-    p.add_argument("--verbose", action="store_true", help="Verbose CR30 protocol logging")
 
     ble = p.add_argument_group("interactive mode (drive an OpenDisplay panel over BLE)")
     ble.add_argument(
@@ -190,10 +192,10 @@ def main(argv: list[str] | None = None) -> int:
         serial = args.serial or "DRYRUN"
         colors = build_colors(scheme, provider)
     else:
-        if not args.port:
-            print("error: --port is required unless --dry-run is set", file=sys.stderr)
+        if not (args.port or args.cr30_ble):
+            print("error: --port or --cr30-ble is required unless --dry-run is set", file=sys.stderr)
             return 2
-        provider, get_serial = _hardware_provider(args.port, args.count, args.verbose, args.calibrate)
+        provider, get_serial = _hardware_provider(args)
         colors = build_colors(scheme, provider)
         serial = args.serial or get_serial()
 

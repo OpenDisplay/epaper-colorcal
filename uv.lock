@@ -75,6 +75,7 @@ dependencies = [
     { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-corebluetooth", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-libdispatch", marker = "sys_platform == 'darwin'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
     { name = "winrt-runtime", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-devices-bluetooth", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-devices-bluetooth-advertisement", marker = "sys_platform == 'win32'" },
@@ -417,6 +418,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ble = [
+    { name = "bleak" },
+]
 opendisplay = [
     { name = "py-opendisplay", marker = "python_full_version >= '3.13'" },
 ]
@@ -442,13 +446,14 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bleak", marker = "extra == 'ble'", specifier = ">=0.22" },
     { name = "colour-science", specifier = ">=0.4.4" },
     { name = "epaper-dithering", specifier = ">=7,<8" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "py-opendisplay", marker = "python_full_version >= '3.13' and extra == 'opendisplay'", specifier = ">=8.0.0" },
     { name = "pyserial-asyncio", marker = "extra == 'serial'", specifier = ">=0.6" },
 ]
-provides-extras = ["serial", "opendisplay"]
+provides-extras = ["serial", "ble", "opendisplay"]
 
 [package.metadata.requires-dev]
 dev = [

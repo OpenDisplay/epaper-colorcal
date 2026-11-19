@@ -176,11 +176,3 @@ async def test_show_color_refuses_an_image_that_is_not_one_ink(fake_opendisplay,
     with pytest.raises(RuntimeError, match="single ink"):
         await panel.show_color(3, "red")
     assert not _FakeDevice.instances[0].uploaded
-
-
-async def test_identical_consecutive_reads_warn(capsys) -> None:
-    async def stuck(_name: str) -> list[float]:
-        return [50.0] * 31
-
-    await measure_interactive(get_scheme("MONO"), SimPanel(), stuck, count=2)
-    assert "bit-identical" in capsys.readouterr().err

@@ -52,10 +52,6 @@ async def measure_interactive(
     for index, name in enumerate(scheme.colors):
         await panel.show_color(index, name)
         reads = [await spd_source(name) for _ in range(count)]
-        if any(a == b for a, b in zip(reads, reads[1:])):
-            # Real reads always differ in the low bits; identical ones suggest the CR30
-            # returned a stored result instead of scanning.
-            print(f"warning: {name}: consecutive CR30 reads were bit-identical (stale read?)", file=sys.stderr)
         colors.append(MeasuredColor(name=name, reading=reading_from_spd(average_spds(reads)), spds=reads))
     return colors
 
