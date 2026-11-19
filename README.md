@@ -52,6 +52,7 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
 | Display | Option | Status |
 |---|---|---|
 | OpenDisplay boards | `--address` | verified on a Spectra 6 7.3" (BWGBRY, firmware 2.27); other schemes use the same path but are untested |
+| OpenEPaperLink tags | `--oepl-ap`, `--oepl-tag` | through the access point, with [py-oepl](https://pypi.org/project/py-oepl/); not yet verified on a tag |
 | Anything you can script | `--show-command` | works with any panel; the command is yours |
 | By hand | (default) | works with any panel |
 
@@ -84,6 +85,7 @@ The extras:
 | `serial` | `pyserial-asyncio` | the CR30 over USB (`--port`) |
 | `ble` | `bleak` | the CR30 over Bluetooth (`--cr30-ble`) |
 | `opendisplay` | `py-opendisplay` | driving an OpenDisplay board (`--address`) |
+| `oepl` | `py-oepl` | driving an OpenEPaperLink tag (`--oepl-ap`) |
 
 `--dry-run` and the tests need none of them.
 
@@ -137,6 +139,21 @@ is measured at the same spot.
   maps to that ink, so the measurement never depends on the palette the board already uses. The
   tool checks the screen really is one ink before uploading.
 
+### With an OpenEPaperLink tag (automatic)
+
+```bash
+uv run epaper-colorcal --id m3_3in0_bwry --oepl-ap 192.168.1.100 --oepl-tag 00007EA674219491 \
+  --cr30-ble --format oepl > perceptual.json
+```
+
+The tag reports its colours (in its own order) and temperature. Each ink is uploaded as a solid,
+undithered image; the tag picks it up at its next check-in, and the tool waits until the tag
+reports it drawn, so a sweep takes about one check-in interval per colour (`--oepl-timeout`,
+default 300 s per colour). The upload sets the tag's content mode to "external image", as any
+image upload does.
+
+`--format oepl` prints a `perceptual` block for the tag's type, see [Output](#output).
+
 ### With a command (any panel you can script)
 
 `--show-command` runs a command for each ink, which should fill the panel with it and return
@@ -149,8 +166,7 @@ uv run epaper-colorcal --scheme SEVEN_COLOR --id photoframe --temp 21 --port /de
 ```
 
 Use `--settle` for the panel's refresh time if the command returns before the panel has
-finished. This is also the way to measure OpenEPaperLink tags today: a short script that pushes
-a solid image to the tag through its access point.
+finished.
 
 ### By hand
 
@@ -181,7 +197,15 @@ uvx epaper-colorcal --inks black,white,orange=#ff8000 --id TEST --temp 23 --dry-
 
 ## Output
 
-stdout is an `epaper-palette` file, ready for `epaper-dithering` 7 (prompts and notes go to stderr):
+`--format` chooses what's printed on stdout (prompts and notes go to stderr):
+
+| Format | For |
+|---|---|
+| `epaper-palette` (default) | `epaper-dithering` 7 and py-opendisplay |
+| `oepl` | an OpenEPaperLink tag type: a `perceptual` block (below) |
+| `spectra` | the raw spectra of every read and each ink's colour |
+
+### `epaper-palette`
 
 ```json
 {
@@ -208,8 +232,29 @@ Use it with:
 - **epaper-dithering** directly: `Palette.load("spectra6_7in3.json")`.
 - To share a measurement, add it to `epaper-dithering`'s `examples/palettes/`.
 
-`--out` writes a sidecar with the raw spectra of every read, plus sRGB and D50 Lab per ink
-(for datasheet comparison), so a measurement can be re-processed later without re-measuring.
+### `oepl`
+
+```json
+{
+  "perceptual": {
+    "white": [255, 255, 255],
+    "black": [59, 57, 61],
+    "red": [186, 90, 53],
+    "yellow": [255, 230, 74]
+  }
+}
+```
+
+OpenEPaperLink tag types (`resources/tagtypes/*.json` in the OpenEPaperLink repository) can say
+how the panel really shows each colour, in `perceptual`: sRGB relative to the panel's white. The
+access point's web UI draws tag images with it. Paste the block into the tag type. Every colour
+is written, in the tag's order.
+
+### `spectra`
+
+The raw spectra of every read, plus sRGB and D50 Lab per ink (for datasheet comparison), so a
+measurement can be re-processed later without re-measuring. `--out FILE` writes this as well,
+whatever `--format` prints.
 
 ## Options
 
@@ -223,9 +268,11 @@ Use it with:
 | `--port` / `--cr30-ble [NAME]` | the CR30 over USB / Bluetooth |
 | `--calibrate` | explicit black/white calibration first (USB) |
 | `--address`, `--key` | show the inks on an OpenDisplay board |
+| `--oepl-ap`, `--oepl-tag`, `--oepl-timeout` | show the inks on an OpenEPaperLink tag |
 | `--show-command` | show the inks by running a command |
 | `--settle` | seconds to wait after an ink is shown, before reading (default 3) |
-| `--out` | raw-spectra sidecar path |
+| `--format` | `epaper-palette` (default), `oepl` or `spectra` |
+| `--out` | also write the raw spectra to this file |
 | `--dry-run` | synthetic spectra and a simulated panel, no hardware |
 
 ## How it works
@@ -236,15 +283,18 @@ instrument ─► reflectance spectrum (%, its own wavelengths) ─► colour-sc
                        epaper_dithering.Palette.from_absolute_lab ◄────┘ ─► epaper-palette JSON
 ```
 
-The measurement loop (`measure.py`) connects two kinds of adapter:
+The measurement loop (`measure.py`) connects instrument and display adapters, and an output
+adapter turns the result into a file:
 
 - **instruments** (`epaper_colorcal.instruments`): anything that returns a reflectance
   `Spectrum`. Today that's the CR30 over USB or Bluetooth (`epaper_colorcal.cr30`; protocol in
   [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a synthetic one for dry runs. A spectrum
   carries its own wavelengths, so an instrument with a different range (e.g. 380–730 nm) works
   unchanged;
-- **displays** (`epaper_colorcal.displays`): OpenDisplay, command, manual and simulated. A
-  display shows one ink at a time and may also report the panel's inks and temperature.
+- **displays** (`epaper_colorcal.displays`): OpenDisplay, OpenEPaperLink, command, manual and
+  simulated. A display shows one ink at a time and may also report the panel's inks and
+  temperature;
+- **outputs** (`epaper_colorcal.outputs`): what the measurement becomes (`--format`).
 
 Colour maths is done here with [`colour-science`](https://www.colour-science.org/), not by the
 instrument, so every instrument is treated the same. Supporting another instrument or panel
