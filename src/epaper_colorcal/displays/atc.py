@@ -55,7 +55,7 @@ class ATCDisplay(Display):
 
         def check(device: Any, adv: Any) -> None:
             data = adv.manufacturer_data.get(lib.MANUFACTURER_ID)
-            name = (adv.local_name or device.name or "").upper().removeprefix("ATC_")
+            name = (adv.local_name or device.name or "").rstrip("\x00").upper().removeprefix("ATC_")
             if data is None or found.done() or self._wanted not in (name, str(device.address).upper()):
                 return
             try:

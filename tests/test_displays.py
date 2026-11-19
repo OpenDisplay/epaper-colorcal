@@ -619,7 +619,7 @@ class _FakeATCLib:
 
 
 def _advert(name: str, *, with_data: bool, temperature: int = 23):
-    device = type("Dev", (), {"address": f"UUID-{name}", "name": name})()
+    device = type("Dev", (), {"address": f"UUID-{name.rstrip(chr(0))}", "name": name})()
     data = {0x1337: bytes([temperature, 0])} if with_data else {}
     return device, type("Adv", (), {"local_name": name, "manufacturer_data": data, "rssi": -60})()
 
@@ -649,7 +649,7 @@ def fake_atc(monkeypatch):
 
 async def test_atc_finds_a_tag_from_any_of_its_adverts(fake_atc) -> None:
     # A packet without the manufacturer data last must not hide the tag (it alternates).
-    fake_atc += [_advert("ATC_05D611", with_data=True), _advert("ATC_05D611", with_data=False)]
+    fake_atc += [_advert("ATC_05D611\x00", with_data=True), _advert("ATC_05D611\x00", with_data=False)]
     display = ATCDisplay("05d611")
     assert await display.temperature() == 23
     await display.connect()
