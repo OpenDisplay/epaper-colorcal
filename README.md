@@ -209,21 +209,24 @@ Use it with:
 ## How it works
 
 ```
-CR30 (USB or BLE) ─► 31-band reflectance, % ─► colour-science: XYZ & Lab, D65/2°
-                                                     │
-                       epaper_dithering.Palette.from_absolute_lab ◄┘ ─► epaper-palette JSON
+instrument ─► reflectance spectrum (%, its own wavelengths) ─► colour-science: XYZ & Lab, D65/2°
+                                                                       │
+                       epaper_dithering.Palette.from_absolute_lab ◄────┘ ─► epaper-palette JSON
 ```
 
 The measurement loop (`measure.py`) connects two kinds of adapter:
 
-- **instruments** (`epaper_colorcal.cr30`): the CR30 over USB or Bluetooth, behind one
-  interface; see [`docs/cr30-protocol.md`](docs/cr30-protocol.md) for the protocol;
+- **instruments** (`epaper_colorcal.instruments`): anything that returns a reflectance
+  `Spectrum`. Today that's the CR30 over USB or Bluetooth (`epaper_colorcal.cr30`; protocol in
+  [`docs/cr30-protocol.md`](docs/cr30-protocol.md)) and a synthetic one for dry runs. A spectrum
+  carries its own wavelengths, so an instrument with a different range (e.g. 380–730 nm) works
+  unchanged;
 - **displays** (`epaper_colorcal.displays`): OpenDisplay, command, manual and simulated. A
   display shows one ink at a time and may also report the panel's inks and temperature.
 
-Supporting another panel or project means adding a display adapter (or, until then, a
-`--show-command` script). Colour maths is done here
-with [`colour-science`](https://www.colour-science.org/), not by the device.
+Colour maths is done here with [`colour-science`](https://www.colour-science.org/), not by the
+instrument, so every instrument is treated the same. Supporting another instrument or panel
+means adding an adapter (for panels, a `--show-command` script works until then).
 
 ## Temperature
 
