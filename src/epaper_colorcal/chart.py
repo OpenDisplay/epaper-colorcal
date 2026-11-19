@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import cgats
+from .instrument_options import add_instrument_options, chosen
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -243,9 +244,9 @@ async def _run(args: argparse.Namespace, chart: Chart, progress: Progress) -> tu
         done = await read_patches(chart, synthetic, progress, auto, count=args.count)  # type: ignore[arg-type]
         return done, "synthetic", "DRYRUN"
 
-    from .cr30 import open_cr30  # pylint: disable=import-outside-toplevel
+    from .instrument_options import open_instrument  # pylint: disable=import-outside-toplevel,reimported
 
-    instrument = open_cr30(port=args.port, ble=args.cr30_ble)
+    instrument = open_instrument(args)
     await instrument.connect()
     try:
         print(f"Connected to {instrument.description} (s/n {instrument.serial_number}).", file=sys.stderr)
@@ -263,13 +264,14 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="epaper-colorcal chart", description=__doc__.split("\n\n", maxsplit=1)[0])
     p.add_argument("chart", help="the ArgyllCMS chart (.ti2) that was printed")
     p.add_argument("--out", help="the .ti3 to write (default: next to the chart)")
-    cr30 = p.add_mutually_exclusive_group(required=True)
-    cr30.add_argument("--port", help="USB serial port of the CR30")
-    cr30.add_argument("--cr30-ble", nargs="?", const="auto", metavar="NAME", help="the CR30 over Bluetooth")
-    cr30.add_argument("--dry-run", action="store_true", help="synthetic readings, no hardware (RGB charts)")
+    add_instrument_options(p)
+    p.add_argument("--dry-run", action="store_true", help="synthetic readings, no hardware (RGB charts)")
     p.add_argument("--count", type=int, default=1, help="reads averaged per patch (default 1)")
     p.add_argument("--note", default="", help="free text for the .ti3's description, e.g. printer and paper")
     args = p.parse_args(argv)
+    if args.dry_run == chosen(args):
+        print("error: choose an instrument (--port, --cr30-ble or --argyll) or --dry-run", file=sys.stderr)
+        return 2
 
     try:
         chart = load_chart(args.chart)
@@ -283,7 +285,7 @@ def main(argv: list[str]) -> int:
 
     try:
         done, instrument, serial = asyncio.run(_run(args, chart, progress))
-    except TimeoutError as exc:
+    except (TimeoutError, RuntimeError) as exc:
         print(f"error: {exc}\nProgress is saved; run the same command again to continue.", file=sys.stderr)
         return 1
     except (asyncio.CancelledError, KeyboardInterrupt):
