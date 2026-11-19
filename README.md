@@ -4,35 +4,42 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://mypy.readthedocs.io/)
 
-Measure the real colours of an e-paper panel with a **CHNSpec CR30** spectrocolorimeter and turn
-them into a palette: an `epaper-palette` file for
-[`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering) and py-opendisplay, a
-`perceptual` block for an OpenEPaperLink tag type, or raw spectra for anything else. The same
-instrument also checks itself against a ColorChecker and profiles printers with ArgyllCMS.
+Measure the real colours of an e-paper display, or of a print, with a **CHNSpec CR30**
+spectrocolorimeter (about €55).
 
-Seat the CR30 on the panel once; the tool shows each ink, waits until the panel has finished
-refreshing, reads its spectrum and prints the palette. With an OpenDisplay board and the CR30
-both on Bluetooth, that's the whole measurement: no cable, no buttons, and the board reports its
-inks and temperature.
+- **E-paper palettes:** the tool shows each ink on the panel, waits for the refresh, reads its
+  spectrum and writes the palette, for any panel: OpenDisplay boards, OpenEPaperLink tags (through
+  the access point or directly over ATC BLE), anything you can script, or by hand.
+- **Outputs for several projects:** an `epaper-palette` file for
+  [`epaper-dithering`](https://github.com/OpenDisplay/epaper-dithering), a `perceptual` block for
+  an OpenEPaperLink tag type, or the raw spectra for anything else.
+- **Beyond e-paper:** check the instrument against a ColorChecker, and profile printers with
+  ArgyllCMS.
 
 ```bash
-uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal \
-  --id spectra6_7in3 --address OD216205 --cr30-ble > spectra6_7in3.json
-```
+# Any panel, by hand: show each ink, seat the CR30, press Enter
+uvx --from 'epaper-colorcal[ble]' epaper-colorcal --scheme BWR --id my_panel --temp 21 --cr30-ble > my_panel.json
 
-No hardware? `uvx epaper-colorcal --scheme BWGBRY --id test --temp 21 --dry-run` runs the whole
-pipeline on synthetic spectra.
+# Automatic, everything wireless: an OpenDisplay board, or an OpenEPaperLink tag over ATC BLE
+uvx --python 3.13 --from 'epaper-colorcal[ble,opendisplay]' epaper-colorcal --id spectra6 --address OD216205 --cr30-ble
+uvx --from 'epaper-colorcal[ble,atc]' epaper-colorcal --id hs_2in0 --atc ATC_05D611 --cr30-ble --format oepl
+
+# No hardware: the whole pipeline on synthetic spectra
+uvx epaper-colorcal --scheme BWGBRY --id test --temp 21 --dry-run
+```
 
 ## Why
 
-Dithering needs to know what the panel's inks really look like. OpenDisplay's earlier palettes
-came from **phone photos of the panel**, which vary a lot with the camera, the lighting and the
-RAW processing. The CR30 (about €55) lights the sample itself at 45° and reads the reflected
-spectrum in 31 bands from 400 to 700 nm. Room light doesn't matter, and the result is the
-panel's physical reflectance, from which any colour space can be computed.
+Dithering needs to know what a panel's inks really look like, and most palettes are guesses:
+ideal colours (`#ff0000` for a red that is really a dull brick red), hand estimates (such as the
+`perceptual` colours in OpenEPaperLink's tag types), or photos of the panel, which vary with the
+camera, the lighting and the RAW processing.
 
-On our unit, the colour computed from its spectrum matches the CR30's own display to
-**ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1**.
+The CR30 lights the sample itself at 45° and reads the reflected spectrum in 31 bands from 400
+to 700 nm. Room light doesn't matter, and the result is the panel's physical reflectance, from
+which any colour space can be computed. On our unit, the colour computed from its spectrum
+matches the CR30's own display to **ΔE 0.05**, and repeated reads of a panel agree to about
+**ΔE 0.1**.
 
 ## Supported hardware
 
