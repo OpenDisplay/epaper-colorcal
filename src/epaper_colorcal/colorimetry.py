@@ -62,19 +62,18 @@ class ColorReading:
 def _reflectance_sd(spd: list[float], wavelengths: list[float] | None = None) -> SpectralDistribution:
     """Build a colour SpectralDistribution from a raw CR30 SPD, normalised to [0, 1].
 
-    The absolute scale of the CR30 floats is not documented by the reverse-engineering
-    work. We accept either a 0-1 fraction or a 0-100 percentage and normalise to a
-    fraction; values are then clipped into [0, 1] (a calibrated reflectance cannot
-    exceed the white tile).
+    The CR30 reports reflectance in **percent** (0-100). Verified on hardware
+    (CR30 fw 0.0.20231219): its white calibration cover reads 71-79 % across all
+    bands (L* ~ 90). The scale is fixed rather than auto-detected, because a
+    very dark ink can read below 1.5 % in every band and would otherwise be
+    mistaken for a near-white 0-1 fraction. Values are clipped into [0, 1].
     """
     wl = list(wavelengths) if wavelengths is not None else CR30_WAVELENGTHS
     if len(spd) != len(wl):
         raise ValueError(f"SPD has {len(spd)} samples but {len(wl)} wavelengths were given")
 
     values = np.asarray(spd, dtype=float)
-    if np.nanmax(values) > 1.5:  # looks like a percentage
-        values = values / 100.0
-    values = np.clip(values, 0.0, 1.0)
+    values = np.clip(values / 100.0, 0.0, 1.0)
 
     return SpectralDistribution(dict(zip(wl, values)), name="CR30 reflectance")
 

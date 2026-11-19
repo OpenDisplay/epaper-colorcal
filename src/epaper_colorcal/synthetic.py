@@ -48,7 +48,7 @@ def _srgb_to_linear(c: float) -> float:
 
 
 def synthetic_spd(srgb: tuple[int, int, int], *, jitter: float = 0.0, seed: int | None = None) -> list[float]:
-    """Build a plausible 31-band reflectance for a target sRGB color.
+    """Build a plausible 31-band reflectance (in percent, like the CR30) for a target sRGB color.
 
     ``jitter`` adds small per-band noise (fraction of signal) so averaging
     multiple reads is meaningful in the dry-run; ``seed`` makes it reproducible.
@@ -61,4 +61,4 @@ def synthetic_spd(srgb: tuple[int, int, int], *, jitter: float = 0.0, seed: int 
         rng = np.random.default_rng(seed)
         refl = np.clip(refl * (1.0 + jitter * rng.standard_normal(refl.shape)), 0.0, 1.0)
 
-    return [float(v) for v in refl]
+    return [float(v) * 100.0 for v in refl]

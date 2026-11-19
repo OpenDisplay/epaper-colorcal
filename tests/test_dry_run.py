@@ -25,7 +25,7 @@ def test_vendored_packets_import_without_serial() -> None:
 def test_synthetic_spd_shape_and_range() -> None:
     spd = synthetic_spd((128, 128, 128))
     assert len(spd) == 31
-    assert all(0.0 <= v <= 1.0 for v in spd)
+    assert all(0.0 <= v <= 100.0 for v in spd)  # percent, like the CR30
 
 
 def test_white_is_lighter_than_black() -> None:
@@ -87,8 +87,9 @@ def test_palette_keeps_out_of_gamut_colours_unclamped() -> None:
     # A perfect white tile, so normalising to white changes nothing, and a narrow-band
     # green far outside sRGB: the palette must carry its measured Lab, not the clamped sRGB.
     scheme = get_scheme("MONO")
-    white = measure_color("white", [[1.0] * 31])
-    green_spd = [1.0 if 510 <= 400 + 10 * i <= 540 else 0.0 for i in range(31)]
+    # Spectra are in percent, like the CR30.
+    white = measure_color("white", [[100.0] * 31])
+    green_spd = [100.0 if 510 <= 400 + 10 * i <= 540 else 0.0 for i in range(31)]
     black = measure_color("black", [green_spd])
     assert black.reading.clipped
 
@@ -128,3 +129,10 @@ def test_cli_dry_run_prints_palette_and_writes_sidecar(tmp_path, capsys) -> None
     palette = Palette.from_json(capsys.readouterr().out)
     assert len(palette) == 4
     assert json.loads(out.read_text())["id"] == "BWRY_TEST"
+
+
+def test_very_dark_percent_spd_stays_dark() -> None:
+    # Real CR30 output is percent; a deep black can be < 1.5 % in every band and
+    # must not be mistaken for a 0-1 fraction (which would read as near-white).
+    dark = reading_from_spd([1.2] * 31)
+    assert dark.lab_d50[0] < 15
