@@ -1,198 +1,143 @@
-# CHNSpec CR30 serial protocol
+# CHNSpec CR30 protocol
 
-This documents the CR30 wire protocol so `epaper-colorcal` can have its own clean,
-typed, tested implementation instead of the vendored copy in
-`src/epaper_colorcal/_vendor/cr30/`.
+The CR30 speaks one command set over two transports: **USB serial** and **Bluetooth LE**.
+Everything below was verified on a CR30 (s/n CM454M1246, software V11.3.0.0.20231219,
+hardware V10.0.0.0) on 2026-11-19 unless marked otherwise. The implementation is
+`src/epaper_colorcal/cr30/`; its tests replay frames captured from that device
+(`tests/fixtures/cr30_frames.json`).
 
-**Provenance / credit.** The protocol below was reverse-engineered by *itohio* —
-see the [`cr30reader`](https://github.com/itohio/color-science) source (MIT) and the
-[writeup](https://itohi.com/colorimetry/reverse-engineering-cr30/). This spec was
-transcribed from that code; the protocol knowledge is theirs and the attribution
-obligation stands regardless of whose code implements it. Everything here is
-**unverified against real hardware** until a device is in hand — validate before
-trusting.
+**Credit.** The USB serial protocol was reverse-engineered by *itohio*: see the
+[write-up](https://itohi.com/colorimetry/reverse-engineering-cr30/) and
+[`color-science`](https://github.com/itohio/color-science) (MIT). The BLE framing and opcodes
+were read out of CHNSpec's official Android app. Our implementation is our own, but the
+protocol knowledge is theirs.
 
----
+## At a glance
 
-## Transport
+| | USB serial | Bluetooth LE |
+|---|---|---|
+| Link | CH34x USB-serial, **19200 8N1** | HM-10-style bridge: service **`FFE0`**, characteristic **`FFE1`** (write + notify) |
+| Frame | always **60 bytes**, both ways | short: `[BB, op, params…, FF, checksum]`; replies of fixed length per command |
+| Before each command | — | write a lone `0x01` (wake), then the frame in 20-byte chunks ~10 ms apart |
+| Device info | `AA 0A 00/01/02` → three 60-byte pages | `0x12` → one 200-byte reply |
+| Measure | `BB 01 00` → header, then pages `BB 01 10/11/12/13` | `0x01` + 4-byte nonce → 10-byte ack, then `0x02` → 200-byte reply |
+| Spectrum | 31 × float32 LE, **percent** | the **same bytes** (verified: one scan read over both) |
 
-|            |                                                   |
-|------------|---------------------------------------------------|
-| Interface  | USB serial (CDC)                                  |
-| Baud rate  | **19200**, 8N1                                    |
-| Frame size | **fixed 60 bytes** (read with `read_exactly(60)`) |
-| Connect    | open port → wait ~1 s → run handshake             |
+The device ignores 60-byte frames over BLE and short frames over USB. Using both transports in
+turn works; replies go back on the transport the command came in on.
 
-Every message in **both directions** is a 60-byte frame.
+The CR30 also exposes `FFE2` (write + notify) and `FFE3` (write) over BLE; nothing uses them.
 
-### BLE transport (same command set, different pipe)
+## Checksum
 
-The CR30 also exposes this protocol over **Bluetooth LE**, recovered from the official Android
-app (full write-up not yet published). Also **unverified against hardware.**
-
-|                 |                                                                     |
-|-----------------|---------------------------------------------------------------------|
-| Interface       | BLE, HM-10 / TI CC254x transparent serial bridge                    |
-| Service UUID    | **`FFE0`**                                                          |
-| Characteristic  | **`FFE1`** (write **and** notify)                                   |
-| Wake            | write a single `0x01` byte before each command                      |
-| Fragmentation   | frames sent in **20-byte chunks**, ~10 ms apart                     |
-| Flow            | `wake` → write frame → subscribe notifications → validate checksum   |
-
-The BLE payloads are the **same command frames** — the app's opcodes match the serial commands
-(`0x01` measure `measure()`, `0x10`/`0x11` black/white cal `calibrate()`). The app builds short,
-variable-length command frames as `[0xBB, opcode, ...params, 0xFF, checksum]` where
-**`checksum = sum(all preceding bytes) & 0xFF`** (note: no `-1`, and the `0xFF` marker is
-included in the sum — differs from the serial checksum below; reconcile on hardware).
-
-Notable differences the app reveals (full command reference in the write-up):
-- The spectrum is fetched via `getMeasureData` (opcode `0x02`, or `0x05` on newer firmware —
-  see `isNewAgreement`) as a **single 200-byte frame** with 31 LE float32 at byte offset 8,
-  rather than the 3-chunk `BB 01 0x10/0x11/0x12` serial read below.
-- Commands not in this serial spec: `0x1A` `syncDisplaySettings` (light source / angle / mode /
-  color space / ΔE formula / second illuminant), `0x1B` `syncToleranceSettings` (write target
-  L*a*b*), `0x1E` `getCalibrationState`, `0x12` `getDeviceInfo`, `0x14` `syncTime`, `0x21`
-  `syncDisplayWhiteness`, and the `0x16` target-storage family.
-
-## Frame layout
+One rule, every frame, both directions, both transports:
 
 ```
-byte   0      start      0xAA (query/info) or 0xBB (command)
+checksum = sum(all preceding bytes, including the 0xFF marker) & 0xFF
+```
+
+(itohio's code computes it as `sum(bytes 0..57) − 1` for `0xBB` frames and without the `−1` for
+`0xAA` frames. The device accepts both for commands, but its own replies always follow the
+single rule, which is what `−1` is for `0xBB` frames: adding the `0xFF` marker subtracts 1.)
+
+## USB serial
+
+### Frame
+
+```
+byte   0      start      0xAA (query) or 0xBB (command)
 byte   1      cmd
-byte   2      subcmd
-byte   3      param
-bytes  4..55  payload    (52 bytes)
-bytes 56..57  unused     (zero; purpose unknown)
-byte  58      marker     0xFF for 0xAA frames; 0x00 or 0xFF for 0xBB frames
+byte   2      sub
+byte   3      param      0x00 in all observed traffic
+bytes  4..57  payload    zero in commands; bytes 56..57 always zero
+byte  58      0xFF       marker
 byte  59      checksum
 ```
 
-### Checksum
+No handshake is needed: open the port and send commands. (itohio's code sends `BB 17`,
+`BB 13 "Check"` and `BB 28 ×5` first, apparently what the vendor software does; the device
+measures without them.)
 
-```
-s = sum(frame[0:58]) & 0xFF        # bytes 0..57 inclusive; marker & checksum excluded
-checksum = (s - 1) & 0xFF  if start == 0xBB  else  s
-```
+### Device info
 
-i.e. `0xBB` command frames subtract 1 from the modular sum; `0xAA` frames do not.
+Send `AA 0A <page>` for pages 0, 1, 2. Bytes **5..54** of each reply are 50 consecutive bytes of
+the device-info record, starting at record byte 3: concatenated they rebuild the same record BLE
+returns whole (offsets below).
 
-### Validity rules
+### Measure
 
-- `start ∈ {0xAA, 0xBB}`
-- `start == 0xAA` ⟹ `marker == 0xFF`
-- `start == 0xBB` ⟹ `marker ∈ {0x00, 0xFF}`
+1. `BB 01 00` triggers a scan (about 0.3 s; the device beeps). The reply header is
+   `BB 01 09 00 28 1F 0A …`: start wavelength / 10 (`0x28` = 400 nm), 31 bands, 10 nm step.
+2. `BB 01 10`, `BB 01 11`, `BB 01 12` return the spectrum: bytes **6..53** of each reply are
+   12 float32, 36 in all; the first 31 are the reflectance, the rest zero.
+3. `BB 01 13` ends the read (it also carries 5 unidentified floats, see below).
 
----
+The pages always return the **last** scan, so they can be re-read, and a scan triggered over
+BLE can be read over USB.
 
-## Handshake (run once after connect)
+### Calibrate
 
-Flush the receive queue, then:
+`BB 10 00` black, `BB 11 00` white, both with the cap closed (the white reference is inside the
+cap). Success is byte 6 (`payload[2]`) `== 0x01` (verified 2026-07-26 on another unit). The
+CR30 also calibrates itself; without explicit calibration our reads matched its own display to
+ΔE 0.05.
 
-1. **Device info** — send `AA 0A <subcmd> 00`, read one frame, for each subcmd:
+## Bluetooth LE
 
-   | subcmd | meaning       | parse (from response payload)                                         |
-   |--------|---------------|-----------------------------------------------------------------------|
-   | `0x00` | name + model  | name = `payload[5:30]`, model = `payload[35:45]` (ASCII, NUL-trimmed) |
-   | `0x01` | serial number | `payload[16:30]` + " - " + `payload[-7:]`                             |
-   | `0x02` | firmware      | build = `payload[1:20]`, firmware = `payload[20:30]`                  |
-   | `0x03` | status/build  | optional; not parsed                                                  |
+### Command flow
 
-   > Note: the upstream `parse_device_info` helper uses different slices
-   > (`payload[5:25]`) than the handshake actually uses. The handshake slices above
-   > are the ones that ran; both are guesses pending hardware confirmation.
+Enable notifications on `FFE1`, wait ~0.5 s. For each command: write `0x01`, write the frame,
+then collect notifications until the command's reply length has arrived. Short replies come in
+one notification; 200-byte replies too on macOS (larger MTU), or in 20-byte pieces.
 
-2. **Init** — send `BB 17 00 00`, read response.
-3. **Check** — send `BB 13 00 00` with payload = `b"Check"` + 7 × `0x00`, read response.
-4. **Query params** — send `BB 28 00 <idx>` for `idx ∈ {0x00, 0x01, 0x02, 0x03, 0xFF}`,
-   read a response for each. (Purpose unclear; housekeeping. Responses unused.)
+The first command after connecting was once not answered at all; retrying it worked. (The
+vendor app also retries its connection.)
 
-For our needs (model + serial for provenance) only step 1 matters; steps 2–4 appear
-to be setup the stock software performs and may or may not be required.
+### Device info: `0x12`
 
----
+Request `BB 12 01 00 00 00 00 00 FF cs`. Reply: 200 bytes, a device-info record with
+NUL-terminated ASCII fields of 30 bytes at:
 
-## Calibration
+| Offset | Field | Example |
+|---|---|---|
+| 7 | (unknown id) | `EX694E485B` |
+| 37 | model | `CR30` |
+| 67 | serial | `CM454M1246` |
+| 97 | software | `V11.3.0.0.20231219` |
+| 127 | hardware | `V10.0.0.0` |
 
-**Verified against a real CR30 (2026-07-26).** This unit has a single cap, closed fully over
-the aperture for *both* black and white calibration — there's a white reference patch fixed
-inside the cap. Working assumption: black calibration reads the sensor with the device's own
-light source off (sealed, dark baseline); white calibration fires the light source and reads
-its reflection off the cap's internal white patch. No separate black tile needed.
+### Measure: `0x01`, then `0x02`
 
-The device also calibrates itself, and its stored calibration is good enough without any
-explicit `BB 10`/`BB 11` from the host: on a second unit (2026-11-19) uncalibrated reads of
-the closed cap matched the device's own screen to ΔE ≈ 0.05, and measuring the cap returns
-bit-identical (stored reference) spectra every time. The stock app tracks calibration
-validity windows — **white ~24 h** (`WHITE_CALIBRATE_INTERVAL = 864e5` ms), **black ~7 days**
-(`BLACK_CALIBRATE_INTERVAL = 6048e5` ms); `getCalibrationState` (BLE `0x1E`) returns both
-states + timestamps.
+1. `BB 01 <mode> n0 n1 n2 n3 00 FF cs`, with mode 0 and a random 4-byte nonce. Reply, 10 bytes:
+   `BB 01 <mode> <status> <start hi> <start lo> <step> <bands> FF cs`, e.g.
+   `BB 01 00 00 01 90 0A 1F FF 75`: status 0 (ok), start 400 nm, 10 nm step, 31 bands.
+2. `BB 02 <mode + 16> 00 00 00 00 00 FF cs`. Reply, 200 bytes: byte 3 is the data type (0 =
+   spectrum), byte 7 the band count, and bytes 8..131 the 31 float32 reflectances.
 
-```
-black:  send  BB 10 00 00 ,  read response
-white:  send  BB 11 00 00 ,  read response
-```
+The app's alternative fetch opcode `0x05` (for "new agreement" firmware) is not supported on
+this unit: it returns a short error reply.
 
-Success ⟺ `response.payload[2] == 0x01` (not `payload[1]` — the original reverse-engineering
-writeup guessed wrong; both black and white calibration on real hardware return
-`payload == 00 00 01 00 ...`).
+### Other commands (from the app, not verified)
 
----
+`0x10`/`0x11` calibrate (reply byte 2: 0 ok, 1 fail, 2 device error), `0x1E` calibration state
+(answers with 20 bytes; the field layout the app suggests doesn't match), `0x1A` display
+settings, `0x1B` tolerance settings, `0x14` time sync, `0x16` stored standards. Our client
+doesn't use them; calibration over BLE raises `NotImplementedError`.
 
-## Measurement
+## Data
 
-Two trigger modes; both end in the same chunk-read sequence.
+- **31 bands, 400–700 nm in 10 nm steps.**
+- Reflectance in **percent**: the white reference in the cap reads 71–79 %.
+- The output is **quantised**: on a steady sample, scans are often bit-identical, including
+  non-consecutive ones (seen on a panel: the same 31 values in scans 3, 5 and 7, others in
+  between). Identical reads are real readings, not stale ones. The cap reads identically every
+  time. Across reads of a panel, colour repeats to about ΔE 0.1.
+- The end page (`BB 01 13`) is not empty: bytes 34..53 hold 5 more float32 (≈ 2.9–5.4 on a
+  green ink) that change with each scan. Meaning unknown; not used.
 
-- **PC-initiated:** send `BB 01 00 00` → device returns a **header** frame.
-- **Button-initiated:** wait for an unsolicited frame (the header) after the user
-  presses the device button.
+## Open questions
 
-Then read the spectral data in chunks. Flush the queue, and for
-`subcmd ∈ {0x10, 0x11, 0x12, 0x13}`:
-
-```
-send  BB 01 <subcmd> 00 ,  read response frame
-```
-
-| chunk subcmd | SPD bytes                             | source          |
-|--------------|---------------------------------------|-----------------|
-| `0x10`       | `payload[2:50]` (48 bytes = 12 × f32) | first SPD slice |
-| `0x11`       | `payload[2:50]` (48 bytes = 12 × f32) | SPD slice       |
-| `0x12`       | `payload[2:50]` (48 bytes = 12 × f32) | SPD slice       |
-| `0x13`       | none                                  | terminator      |
-
-Concatenate the SPD bytes from `0x10`, `0x11`, `0x12` → 144 bytes. The reflectance
-spectrum is the **first 124 bytes** decoded as **31 little-endian `float32`**:
-
-```
-spd = struct.unpack("<31f", accumulated[:124])
-```
-
-(The trailing 20 bytes of the 144 are discarded — likely padding or unrelated fields.)
-
-### Wavelengths
-
-31 bands, **400–700 nm in 10 nm steps**: `[400, 410, …, 700]`.
-
----
-
-## Open questions (resolve with real hardware)
-
-- ~~**Reflectance scale of the floats**~~ — **resolved 2026-11-19: percentage `0..100`**
-  (white cap reads 71–79 %; Lab matches the device's screen to ΔE ≈ 0.05).
-- **Bytes 56–57** and the `0xBB` **marker** `0x00` vs `0xFF` semantics.
-- Whether handshake steps **2–4** are actually required to enable measurement.
-- Meaning of the `param` byte (always `0x00` in observed traffic).
-- Whether the 3-chunk / 144-byte layout is fixed or varies by model/firmware
-  (the upstream code only special-cases `model == "CR30"` for wavelengths).
-
-## Reimplementation plan
-
-When a CR30 is available:
-
-1. Implement `cr30/` against this spec — typed, inside our ruff/mypy gates, with
-   unit tests for frame build/parse/checksum (these need no hardware).
-2. Capture a few real measurements with **both** the vendored code and the new code;
-   assert the decoded SPDs match **byte-for-byte**.
-3. Confirm calibration + a full palette measurement end-to-end.
-4. Delete `src/epaper_colorcal/_vendor/cr30/` and replace the NOTICE with a one-line
-   credit to the reverse-engineering writeup in this file.
+- The meaning of the USB `param` byte, the five floats in the end page, and the trailing five
+  float slots of the data pages (always zero).
+- The BLE `0x1E` calibration-state layout.
+- Whether other CR30 firmware versions need the `0x05` fetch or the USB handshake.
