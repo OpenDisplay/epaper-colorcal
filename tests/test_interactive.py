@@ -176,3 +176,25 @@ async def test_show_color_refuses_an_image_that_is_not_one_ink(fake_opendisplay,
     with pytest.raises(RuntimeError, match="single ink"):
         await panel.show_color(3, "red")
     assert not _FakeDevice.instances[0].uploaded
+
+
+@pytest.mark.parametrize(
+    ("address", "advertised", "expected"),
+    [
+        ("OD216205", 18.5, 18.5),
+        ("b8b54e7f-4175-8e2a-cec4-efc8f3115ee5", 21.0, 21.0),  # by address, any case
+        ("OD216205", -40.0, None),  # "no reading"
+        ("OD999999", 18.5, None),  # not seen
+    ],
+)
+async def test_read_board_temperature(monkeypatch, address: str, advertised: float, expected: float | None) -> None:
+    discovery = pytest.importorskip("opendisplay.discovery")
+    from epaper_colorcal.interactive import read_board_temperature
+
+    adv = type("Adv", (), {"temperature_c": advertised})()
+
+    async def fake_discover(timeout: float) -> dict[str, tuple[str, object]]:
+        return {"OD216205": ("B8B54E7F-4175-8E2A-CEC4-EFC8F3115EE5", adv), "OD1F9C04": ("A41A", None)}
+
+    monkeypatch.setattr(discovery, "discover_devices_with_adv", fake_discover)
+    assert await read_board_temperature(address) == expected

@@ -89,7 +89,7 @@ def _hardware_provider(args: argparse.Namespace) -> tuple[SpdProvider, Callable[
 
 async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[list[MeasuredColor], str]:
     """Drive the panel + CR30 (or simulated stand-ins) to measure every color."""
-    from .interactive import OpenDisplayPanel, SimPanel, measure_interactive
+    from .interactive import OpenDisplayPanel, SimPanel, measure_interactive, read_board_temperature
 
     if args.dry_run:
         panel: object = SimPanel(settle_seconds=args.settle)
@@ -105,6 +105,14 @@ async def _run_interactive(args: argparse.Namespace, scheme: Scheme) -> tuple[li
         raise SystemExit("--address is required for interactive mode (or add --dry-run)")
     if not (args.port or args.cr30_ble):
         raise SystemExit("--port or --cr30-ble (the CR30) is required for interactive mode (or add --dry-run)")
+
+    if args.temp is None:
+        args.temp = await read_board_temperature(args.address)
+        if args.temp is not None:
+            print(
+                f"Panel temperature: {args.temp:g} °C from the board's chip sensor (approximate; --temp overrides).",
+                file=sys.stderr,
+            )
 
     cr30 = await _open_cr30(args)
     if sys.stdin.isatty():
@@ -178,13 +186,6 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     scheme = get_scheme(args.scheme)
 
-    if args.temp is None:
-        print(
-            "WARNING: no --temp given. e-paper color is temperature-dependent; "
-            "this palette will be recorded as UNRECORDED temperature.",
-            file=sys.stderr,
-        )
-
     if args.interactive:
         colors, serial = asyncio.run(_run_interactive(args, scheme))
     elif args.dry_run:
@@ -199,6 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         colors = build_colors(scheme, provider)
         serial = args.serial or get_serial()
 
+    if args.temp is None:
+        print(
+            "WARNING: no panel temperature (--temp). e-paper color is temperature-dependent; "
+            "this palette is recorded with the temperature UNRECORDED.",
+            file=sys.stderr,
+        )
     print(render_palette(scheme, colors, serial=serial, note=args.note, temperature_c=args.temp))
 
     if any(c.reading.clipped for c in colors):
