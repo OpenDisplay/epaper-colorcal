@@ -1,7 +1,7 @@
-"""CLI: measure a panel's inks with a CR30 and print a measured palette.
+"""CLI: measure a panel's inks with a spectrophotometer and print a measured palette.
 
 Shows each ink on the panel (you, a command, or an OpenDisplay board), reads it with the
-CR30 over USB or Bluetooth, and prints an ``epaper-palette`` JSON document on stdout.
+instrument (the CR30, over USB or Bluetooth), and prints an ``epaper-palette`` JSON document on stdout.
 Prompts and notes go to stderr. ``--dry-run`` needs no hardware.
 
 Example (no hardware):
@@ -120,7 +120,7 @@ async def _measure(
     await _connect_instrument(args, instrument)
     try:
         if display.automatic and not args.dry_run and sys.stdin.isatty():
-            await asyncio.to_thread(input, "Seat the CR30 flat on the panel, then press Enter to start… ")
+            await asyncio.to_thread(input, "Seat the instrument flat on the panel, then press Enter to start… ")
         await display.connect()
         try:
             scheme = _resolve_scheme(requested, await display.scheme())
@@ -218,7 +218,7 @@ def _check_args(args: argparse.Namespace) -> str | None:
     if args.static and (args.address or args.atc or args.oepl_ap or args.show_command):
         return "--static is for samples shown by hand, not with a display that shows the inks itself"
     if not args.dry_run and not (args.port or args.cr30_ble):
-        return "connect the CR30 with --port or --cr30-ble (or use --dry-run)"
+        return "connect an instrument: --port or --cr30-ble for the CR30 (or use --dry-run)"
     return None
 
 

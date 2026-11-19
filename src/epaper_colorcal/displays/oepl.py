@@ -3,7 +3,7 @@
 Each ink is uploaded as a solid image with the AP's dithering off. The tag fetches it at its
 next check-in, so showing one ink takes up to a check-in interval. py-oepl returns once the
 transfer is complete; the tag refreshes after that, so the measurement loop then waits until
-the CR30 reads a stable colour.
+the instrument reads a stable colour.
 
 The refresh waveform ("LUT") changes the colours, red especially: a fast waveform drives the
 particles less. The tag is measured with the full refresh by default and its stored LUT is
@@ -150,7 +150,7 @@ class OEPLDisplay(Display):  # pylint: disable=too-many-instance-attributes  # s
         image = Image.new("RGB", (self._tag_type.width, self._tag_type.height), tuple(rgb))
         # dither=0: the AP maps each pixel to the nearest colour of the tag, so the solid nominal
         # colour stays one ink. wait=True returns once the tag has received the image; it then
-        # refreshes, which the measurement loop waits out with the CR30.
+        # refreshes, which the measurement loop waits out with the instrument.
         try:
             await self._client.tag(self._mac).upload_image(
                 image,

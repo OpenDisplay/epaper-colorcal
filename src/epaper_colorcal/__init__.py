@@ -1,6 +1,6 @@
 """epaper-colorcal.
 
-Drive a CHNSpec CR30 spectral colorimeter to produce measured e-paper color
+Drive a spectrophotometer (the CHNSpec CR30) to produce measured e-paper colour
 palettes (``epaper-palette`` JSON) for OpenDisplay's epaper-dithering.
 """
 

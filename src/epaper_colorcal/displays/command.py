@@ -36,7 +36,7 @@ class CommandDisplay(Display):
     def __init__(self, template: str, settle_seconds: float = 0.0) -> None:
         from ..schemes import Ink  # pylint: disable=import-outside-toplevel
 
-        try:  # fail now, not after the CR30 is connected, if the template is malformed
+        try:  # fail now, not after the instrument is connected, if the template is malformed
             render(template, 0, Ink("white", "#ffffff"))
         except (KeyError, IndexError, ValueError) as exc:
             raise ValueError(f"--show-command: bad template ({exc}); fields are {', '.join(FIELDS)}") from exc

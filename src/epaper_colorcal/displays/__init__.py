@@ -1,4 +1,4 @@
-"""Displays: how each ink gets onto the panel before the CR30 reads it.
+"""Displays: how each ink gets onto the panel before the instrument reads it.
 
 :class:`Display` is the port; the adapters are
 
