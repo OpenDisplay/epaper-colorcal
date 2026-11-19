@@ -39,6 +39,28 @@ display to **ΔE 0.05**, and repeated reads of a panel agree to about **ΔE 0.1*
   that does it (`--show-command`), or you, by hand.
 - Python 3.11+ (3.13+ to drive OpenDisplay boards, which needs `py-opendisplay`).
 
+## Supported hardware
+
+**Instruments**
+
+| Instrument | Connection | Status |
+|---|---|---|
+| CHNSpec CR30 | USB (`--port`), Bluetooth (`--cr30-ble`) | verified (software V11.3.0.0.20231219); its colour matches the device's own display to ΔE 0.05 |
+
+**Showing the inks**
+
+| Display | Option | Status |
+|---|---|---|
+| OpenDisplay boards | `--address` | verified on a Spectra 6 7.3" (BWGBRY, firmware 2.27); other schemes use the same path but are untested |
+| Anything you can script | `--show-command` | works with any panel; the command is yours |
+| By hand | (default) | works with any panel |
+
+**Platforms:** tested on macOS. Linux and Windows should work (USB serial and Bluetooth go through
+`pyserial` and `bleak`) but are untested.
+
+Missing your instrument or panel? Adding one is a single class: see
+[`docs/adapters.md`](docs/adapters.md). Reports from other hardware and platforms are welcome too.
+
 ## Install
 
 Nothing to install with [uv](https://docs.astral.sh/uv/): `uvx` runs the tool from PyPI in a
@@ -226,7 +248,8 @@ The measurement loop (`measure.py`) connects two kinds of adapter:
 
 Colour maths is done here with [`colour-science`](https://www.colour-science.org/), not by the
 instrument, so every instrument is treated the same. Supporting another instrument or panel
-means adding an adapter (for panels, a `--show-command` script works until then).
+means adding an adapter: see [`docs/adapters.md`](docs/adapters.md) (for panels, a
+`--show-command` script works until then).
 
 ## Temperature
 
