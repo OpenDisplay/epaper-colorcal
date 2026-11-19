@@ -75,3 +75,112 @@ def test_solid_ink_images_select_their_ink_on_a_measured_palette(scheme_name: st
         image = driver._solid_ink_image(index).resize((8, 8))  # pylint: disable=protected-access
         out = dither_image(image, palette, DitherOptions(mode=DitherMode.NONE))
         assert set(out.get_flattened_data()) == {palette.index_of(name)}, name
+
+
+# ── OpenDisplayPanel against a fake py-opendisplay device ───────────────────
+
+
+class _FakeDevice:
+    """Stands in for opendisplay.OpenDisplayDevice; records how it was used."""
+
+    instances: list[_FakeDevice] = []
+    scheme_name = "BWGBRY"
+
+    def __init__(self, mac_address: str | None = None, device_name: str | None = None) -> None:
+        self.mac_address = mac_address
+        self.device_name = device_name
+        self.width, self.height = 40, 24
+        self.config = None
+        self.color_scheme = type("Scheme", (), {"name": self.scheme_name})()
+        self.uploaded: list[object] = []
+        self.closed = False
+        _FakeDevice.instances.append(self)
+
+    async def __aenter__(self) -> _FakeDevice:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+    async def authenticate(self, key: bytes) -> None:  # pragma: no cover - not exercised
+        pass
+
+    async def interrogate(self) -> None:
+        pass
+
+    async def upload_prepared_image(self, prepared: object) -> None:
+        self.uploaded.append(prepared)
+
+
+@pytest.fixture
+def fake_opendisplay(monkeypatch):
+    opendisplay = pytest.importorskip("opendisplay")
+    _FakeDevice.instances = []
+    _FakeDevice.scheme_name = "BWGBRY"
+    monkeypatch.setattr(opendisplay, "OpenDisplayDevice", _FakeDevice)
+    return opendisplay
+
+
+@pytest.mark.parametrize(
+    ("address", "kwarg"),
+    [
+        ("AA:BB:CC:DD:EE:FF", "mac_address"),
+        ("B8B54E7F-4175-8E2A-CEC4-EFC8F3115EE5", "mac_address"),
+        ("OD216205", "device_name"),
+    ],
+)
+async def test_connect_accepts_mac_uuid_or_name(fake_opendisplay, address: str, kwarg: str) -> None:
+    panel = OpenDisplayPanel(address, get_scheme("BWGBRY"))
+    await panel.connect()
+    assert getattr(_FakeDevice.instances[0], kwarg) == address
+    await panel.close()
+
+
+async def test_connect_refuses_a_panel_with_another_scheme(fake_opendisplay) -> None:
+    _FakeDevice.scheme_name = "BWR"
+    panel = OpenDisplayPanel("OD216205", get_scheme("BWGBRY"))
+    with pytest.raises(SystemExit, match="BWR"):
+        await panel.connect()
+    assert _FakeDevice.instances[0].closed
+
+
+async def test_show_color_uploads_a_full_screen_single_ink(fake_opendisplay, monkeypatch) -> None:
+    seen: list[object] = []
+
+    def fake_prepare(image, **_kwargs):
+        seen.append(image)
+        return b"", None, image
+
+    monkeypatch.setattr(fake_opendisplay, "prepare_image", fake_prepare)
+    panel = OpenDisplayPanel("OD216205", get_scheme("BWGBRY"), settle_seconds=0)
+    await panel.connect()
+    await panel.show_color(3, "red")
+
+    device = _FakeDevice.instances[0]
+    assert len(device.uploaded) == 1
+    assert seen[0].size == (40, 24)
+    assert seen[0].getcolors() == [(40 * 24, (255, 0, 0))]
+
+
+async def test_show_color_refuses_an_image_that_is_not_one_ink(fake_opendisplay, monkeypatch) -> None:
+    from PIL import Image
+
+    def two_inks(image, **_kwargs):
+        mixed = image.copy()
+        mixed.paste(Image.new("RGB", (1, 1), (0, 0, 0)), (0, 0))
+        return b"", None, mixed
+
+    monkeypatch.setattr(fake_opendisplay, "prepare_image", two_inks)
+    panel = OpenDisplayPanel("OD216205", get_scheme("BWGBRY"), settle_seconds=0)
+    await panel.connect()
+    with pytest.raises(RuntimeError, match="single ink"):
+        await panel.show_color(3, "red")
+    assert not _FakeDevice.instances[0].uploaded
+
+
+async def test_identical_consecutive_reads_warn(capsys) -> None:
+    async def stuck(_name: str) -> list[float]:
+        return [50.0] * 31
+
+    await measure_interactive(get_scheme("MONO"), SimPanel(), stuck, count=2)
+    assert "bit-identical" in capsys.readouterr().err

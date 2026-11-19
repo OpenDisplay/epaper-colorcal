@@ -139,7 +139,7 @@ class CR30Device:
 
     def _parse_serial_number(self, data):
         """Parse serial number from AA 0A 01 response."""
-        self._device_serial = data[16:30].decode('ascii', errors='ignore').strip('\x00')
+        self._device_serial = data[15:30].decode('ascii', errors='ignore').strip('\x00')
         self._device_serial += " - " + data[-7:].decode('ascii', errors='ignore').strip('\x00')
 
     def _parse_firmware(self, data):

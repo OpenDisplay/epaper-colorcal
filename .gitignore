@@ -368,3 +368,10 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
+
+# Vendor app binaries analysed for reverse engineering (CR30 BLE protocol work).
+# Kept local, never committed or redistributed.
+*.apk
+
+# Raw measurement sidecars; publish only the finished palette files.
+spectra/
