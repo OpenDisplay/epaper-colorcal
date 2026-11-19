@@ -121,6 +121,12 @@ def reading_from_spectrum(spectrum: Spectrum) -> ColorReading:
     )
 
 
+def exact_lab_d50(spectrum: Spectrum) -> tuple[float, float, float]:
+    """CIE L*a*b* under D50/2°, unrounded (for ICC profiling)."""
+    lab = colour.XYZ_to_Lab(_reflectance_to_xyz(_reflectance_sd(spectrum), "D50"), _CCS["D50"])
+    return (float(lab[0]), float(lab[1]), float(lab[2]))
+
+
 def average_spds(spds: list[list[float]]) -> list[float]:
     """Average several SPD reads band-by-band (noise reduction)."""
     if not spds:
