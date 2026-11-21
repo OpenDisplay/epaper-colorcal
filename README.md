@@ -96,6 +96,11 @@ its place if you use uvx.
 Every workflow below works the same with any supported instrument; only how you connect it
 differs.
 
+**Seat the instrument carefully.** Centre it on the sample, keep it flat and press it down
+gently, then lift and seat it again for each sample. A reading taken off-centre or tilted can be
+far too dark, while the repeated reads of one seating still agree with each other, so their
+agreement doesn't show that the seating was right.
+
 ### CHNSpec CR30
 
 - **Bluetooth:** switch it on and pass `--cr30-ble`. It's found by scanning, or give its name

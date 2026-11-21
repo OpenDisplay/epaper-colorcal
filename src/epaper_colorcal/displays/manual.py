@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
+from ..prompts import ask
 from .base import Display
 
 if TYPE_CHECKING:
@@ -31,4 +31,4 @@ class ManualDisplay(Display):
             prompt = (
                 f"Show {ink.name.upper()} ({ink.nominal}, undithered) full-screen, seat the instrument, press Enter… "
             )
-        await asyncio.to_thread(input, prompt)
+        await ask(prompt)

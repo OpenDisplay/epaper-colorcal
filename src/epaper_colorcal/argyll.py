@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import cgats
 from .instruments import Instrument
+from .prompts import ask
 from .spectrum import Spectrum
 
 FILTERS = {"M0": "n", "M1": "5", "M2": "u"}
@@ -87,7 +88,7 @@ class SpotreadInstrument(Instrument):
                 "https://www.argyllcms.com), which talks to the instrument."
             )
         if self._ask_to_calibrate and sys.stdin.isatty():
-            await asyncio.to_thread(input, "Put the instrument on its white calibration tile, then press Enter… ")
+            await ask("Put the instrument on its white calibration tile, then press Enter… ")
         # The first call calibrates if the instrument needs it (or takes a reading, which is discarded).
         await self._run()
 

@@ -27,7 +27,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import cgats
+from . import cgats, prompts
 from .instrument_options import add_instrument_options, chosen
 
 if TYPE_CHECKING:
@@ -251,10 +251,10 @@ async def _run(args: argparse.Namespace, chart: Chart, progress: Progress) -> tu
     try:
         print(f"Connected to {instrument.description} (s/n {instrument.serial_number}).", file=sys.stderr)
 
-        async def ask(_patch: Patch, prompt: str) -> str:
-            return await asyncio.to_thread(input, prompt)
+        async def ask_patch(_patch: Patch, prompt: str) -> str:
+            return await prompts.ask(prompt)
 
-        done = await read_patches(chart, instrument, progress, ask, count=args.count)
+        done = await read_patches(chart, instrument, progress, ask_patch, count=args.count)
         return done, instrument.description, instrument.serial_number
     finally:
         await instrument.close()

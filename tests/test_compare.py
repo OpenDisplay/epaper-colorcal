@@ -66,7 +66,7 @@ def test_cli_compare_reference_against_itself(capsys) -> None:
 
 def test_cli_static_measurement_of_the_chart(capsys, monkeypatch) -> None:
     prompts: list[str] = []
-    monkeypatch.setattr("builtins.input", lambda p: prompts.append(p) or "")
+    monkeypatch.setattr("epaper_colorcal.prompts.ask_sync", lambda p: prompts.append(p) or "")
     argv = ["--scheme", "COLORCHECKER24", "--id", "cc", "--temp", "21", "--dry-run", "--format", "spectra"]
     assert main(argv) == 0  # dry run: simulated display, so no prompts
     assert len(json.loads(capsys.readouterr().out)["colors"]) == 24
@@ -74,7 +74,7 @@ def test_cli_static_measurement_of_the_chart(capsys, monkeypatch) -> None:
 
 async def test_static_manual_display_reads_right_away(monkeypatch) -> None:
     prompts: list[str] = []
-    monkeypatch.setattr("builtins.input", lambda p: prompts.append(p) or "")
+    monkeypatch.setattr("epaper_colorcal.prompts.ask_sync", lambda p: prompts.append(p) or "")
     display = ManualDisplay(static=True)
     await display.show(0, Ink("dark_skin", "#744f41"))
     assert display.settled_after_show and "DARK SKIN" in prompts[0]
