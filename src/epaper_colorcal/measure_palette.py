@@ -49,7 +49,7 @@ def _display(args: argparse.Namespace) -> Display:
         return SimDisplay()
     if args.address:
         key = bytes.fromhex(args.key) if args.key else None
-        return OpenDisplayDisplay(args.address, key=key, settle_seconds=args.settle)
+        return OpenDisplayDisplay(args.address, key=key, settle_seconds=args.settle, mode=args.mode)
     if args.atc:
         return ATCDisplay(args.atc, settle_seconds=args.settle)
     if args.oepl_ap:
@@ -167,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--address", help="Drive this OpenDisplay board over Bluetooth (name, MAC or macOS UUID)")
     show.add_argument("--key", help="The OpenDisplay board's encryption key as hex, if it has one")
     show.add_argument(
+        "--mode",
+        metavar="NAME",
+        help="With --address: measure this drive mode's calibration entries (firmware 3.0, e.g. colour16)",
+    )
+    show.add_argument(
         "--atc", metavar="NAME", help="Show the inks on a tag with ATC BLE OEPL firmware, e.g. ATC_05D611"
     )
     show.add_argument("--oepl-ap", metavar="HOST", help="Show the inks on an OpenEPaperLink tag through this AP")
@@ -201,14 +206,23 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _check_args(args: argparse.Namespace) -> str | None:
-    """What's wrong with the arguments, if anything."""
+def _check_display_args(args: argparse.Namespace) -> str | None:
+    """What's wrong with the options that choose how the inks are shown, if anything."""
+    if args.mode and not args.address:
+        return "--mode is for an OpenDisplay board (--address)"
     if sum(bool(x) for x in (args.address, args.atc, args.oepl_ap, args.show_command)) > 1:
         return "--address, --atc, --oepl-ap and --show-command all show the inks; pick one"
     if bool(args.oepl_ap) != bool(args.oepl_tag):
         return "--oepl-ap and --oepl-tag go together"
     if args.static and (args.address or args.atc or args.oepl_ap or args.show_command):
         return "--static is for samples shown by hand, not with a display that shows the inks itself"
+    return None
+
+
+def _check_args(args: argparse.Namespace) -> str | None:
+    """What's wrong with the arguments, if anything."""
+    if problem := _check_display_args(args):
+        return problem
     if not args.dry_run and not chosen(args):
         return "connect an instrument: --port or --cr30-ble for the CR30, --argyll for ArgyllCMS (or use --dry-run)"
     if args.calibrate and args.argyll:
