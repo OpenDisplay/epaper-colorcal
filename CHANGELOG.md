@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.6.0...v0.6.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* print prompts on stderr so a redirected output stays valid JSON ([6f0c972](https://github.com/OpenDisplay/epaper-colorcal/commit/6f0c9724c7a2f6dd1d63291a10e02e9bb80e5c8d))
+
 ## [0.6.0](https://github.com/OpenDisplay/epaper-colorcal/compare/v0.5.0...v0.6.0) (2026-11-19)
 
 
