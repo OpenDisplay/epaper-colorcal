@@ -129,7 +129,7 @@ def test_command_display_rejects_unknown_fields_up_front() -> None:
 
 async def test_manual_display_prompts_for_each_ink(monkeypatch) -> None:
     prompts: list[str] = []
-    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+    monkeypatch.setattr("epaper_colorcal.prompts.ask_sync", lambda prompt: prompts.append(prompt) or "")
     await ManualDisplay().show(3, Ink("red", "#ff0000"))
     assert "RED (#ff0000" in prompts[0]
     assert ManualDisplay.automatic is False
@@ -680,3 +680,12 @@ async def test_atc_tag_not_found_is_explained(fake_atc, monkeypatch) -> None:
     fake_atc.append(_advert("ATC_164840", with_data=True))
     with pytest.raises(SystemExit, match="No ATC BLE tag '05D611'"):
         await ATCDisplay("05D611").connect()
+
+
+def test_prompts_go_to_stderr_so_stdout_stays_the_output(monkeypatch, capsys) -> None:
+    from epaper_colorcal.prompts import ask_sync
+
+    monkeypatch.setattr("builtins.input", lambda *args: "")
+    ask_sync("Seat the instrument… ")
+    out, err = capsys.readouterr()
+    assert out == "" and err == "Seat the instrument… "

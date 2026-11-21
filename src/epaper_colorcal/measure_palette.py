@@ -25,6 +25,7 @@ from .emit import MeasuredColor
 from .instrument_options import add_instrument_options, chosen, describe_connection, open_instrument
 from .measure import measure_all, measure_color
 from .outputs import OUTPUTS, Measurement, get_output
+from .prompts import ask
 from .schemes import SCHEMES, Scheme, get_scheme, parse_inks
 
 if TYPE_CHECKING:
@@ -79,10 +80,10 @@ async def _connect_instrument(args: argparse.Namespace, instrument: Instrument) 
     print(f"Connected to {instrument.description} (s/n {instrument.serial_number}) over {via}.", file=sys.stderr)
 
     if args.calibrate:
-        await asyncio.to_thread(input, "Close the CR30 cap fully (black calibration), then press Enter… ")
+        await ask("Close the CR30 cap fully (black calibration), then press Enter… ")
         if not await instrument.calibrate_black():
             raise SystemExit("Black calibration failed.")
-        await asyncio.to_thread(input, "Keep the cap closed (white calibration), then press Enter… ")
+        await ask("Keep the cap closed (white calibration), then press Enter… ")
         if not await instrument.calibrate_white():
             raise SystemExit("White calibration failed.")
 
@@ -119,7 +120,7 @@ async def _measure(
     await _connect_instrument(args, instrument)
     try:
         if display.automatic and not args.dry_run and sys.stdin.isatty():
-            await asyncio.to_thread(input, "Seat the instrument flat on the panel, then press Enter to start… ")
+            await ask("Seat the instrument flat on the panel, then press Enter to start… ")
         await display.connect()
         try:
             scheme = _resolve_scheme(requested, await display.scheme())

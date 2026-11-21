@@ -98,5 +98,8 @@ async def measure_all(scheme: Scheme, display: Display, instrument: Instrument, 
             print(f"  {ink.name}: waiting for the panel to refresh and settle…", file=sys.stderr)
             seconds = await wait_until_settled(instrument, before)
             print(f"  {ink.name}: settled after {seconds:.0f} s", file=sys.stderr)
-        colors.append(measure_spectra(ink.name, [await instrument.measure() for _ in range(count)]))
+        color = measure_spectra(ink.name, [await instrument.measure() for _ in range(count)])
+        lab = color.reading.lab_d65
+        print(f"  {ink.name}: L* {lab[0]:.2f} a* {lab[1]:.2f} b* {lab[2]:.2f} (D65)", file=sys.stderr)
+        colors.append(color)
     return colors
