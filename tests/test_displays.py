@@ -682,6 +682,21 @@ async def test_atc_tag_not_found_is_explained(fake_atc, monkeypatch) -> None:
         await ATCDisplay("05D611").connect()
 
 
+def test_drive_mode_entries_are_named_by_codes_with_the_paper_white_found_by_its_code() -> None:
+    from epaper_colorcal.displays.opendisplay import entry_names
+
+    codes = [(2, 0, 0), (1, 1, 1), (2, 1, 1)]
+    assert entry_names(codes, white_code=1) == ["codes_200", "white", "codes_211"]
+    assert entry_names(codes, white_code=None) == ["codes_200", "codes_111", "codes_211"]
+
+
+def test_mode_needs_an_opendisplay_board(capsys) -> None:
+    from epaper_colorcal.measure_palette import main
+
+    assert main(["--scheme", "BWRY", "--id", "x", "--dry-run", "--mode", "colour16"]) == 2
+    assert "--mode is for an OpenDisplay board" in capsys.readouterr().err
+
+
 def test_prompts_go_to_stderr_so_stdout_stays_the_output(monkeypatch, capsys) -> None:
     from epaper_colorcal.prompts import ask_sync
 
